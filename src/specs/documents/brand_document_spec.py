@@ -1,28 +1,23 @@
 from pydantic import BaseModel, HttpUrl, field_validator
 from typing import Optional, List, Dict, Any, Literal, get_args
-from ..common.constants import SOCIAL_PLATFORMS
+from ..common.enums import Platform
 from ..common.base_document_spec import BaseDocument
 
+
 class PlatformAccount(BaseModel):
-    platform_account_id: str
-    handle: Optional[str] = None
-    username: Optional[str] = None
-    profile_url: Optional[HttpUrl] = None
-    access_token: str
+    platform_account_id: str # Unique identifier for the platform account
+    handle: Optional[str] = None # Handle for the social media account
+    username: Optional[str] = None # Username for the social media account
+    profile_url: Optional[HttpUrl] = None # Profile URL for the social media account
+    access_token: str # Access token for the social media account
     expiry_date: Optional[str] = None  # ISO date string
-    extra: Optional[Dict[str, Any]] = None
+    extra: Optional[Dict[str, Any]] = None # Additional metadata for the platform account
+
 
 class SocialAccount(BaseModel):
-    platforms: List[str]
-    account: PlatformAccount
+    platforms: Platform # Platform the account is associated with
+    account: PlatformAccount # Platform account details
 
-    @field_validator("platforms", mode="before")
-    @classmethod
-    def validate_platforms(cls, values):
-        for value in values:
-            if value not in SOCIAL_PLATFORMS:
-                raise ValueError(f"Each platform must be one of {SOCIAL_PLATFORMS}, got '{value}'")
-        return values
 
 class BrandColors(BaseModel):
     primary: Optional[str] = None
@@ -36,6 +31,7 @@ class BrandFonts(BaseModel):
     secondary: Optional[str] = None
 
 class BrandStyle(BaseModel):
+    description: Optional[str] = None # Description of the brand style
     colors: Optional[BrandColors] = None
     fonts: Optional[BrandFonts] = None
 

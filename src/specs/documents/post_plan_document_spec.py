@@ -1,22 +1,15 @@
 from pydantic import BaseModel, HttpUrl, field_validator
 from typing import Optional, List, Literal
 from datetime import datetime
-from ..common.constants import SOCIAL_PLATFORMS
+from ..common.enums import Platform
 from ..common.base_document_spec import BaseDocument
 
 class PostPlanInfo(BaseModel):
 	name: str
 	description: str
 	type: List[Literal["image", "multi-image", "video"]]
-	platforms: List[str]
+	platforms: List[Platform]
 
-	@field_validator("platforms", mode="before")
-	@classmethod
-	def validate_platforms(cls, values):
-		for value in values:
-			if value not in SOCIAL_PLATFORMS:
-				raise ValueError(f"Each platform must be one of {SOCIAL_PLATFORMS}, got '{value}'")
-		return values
 
 class PostPlanSchedule(BaseModel):
 	frequency: str

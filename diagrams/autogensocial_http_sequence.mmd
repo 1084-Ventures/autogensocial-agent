@@ -5,25 +5,31 @@ id: 16629962-bb60-4718-ad83-7da6c0705c9e
 sequenceDiagram
 	participant Client as Client (Postman)
 	participant Orchestrator as Orchestrator (orchestrate_content)
-	participant CosmosDB as CosmosDB
-	participant CopywriterAgent as CopywriterAgent
+	participant GetBrandTool as GetBrandTool
+	participant GetPostPlanTool as GetPostPlanTool
 	participant GetPostsTool as GetPostsTool
+	participant CopywriterAgent as CopywriterAgent
 	participant ComposerAgent as ComposerAgent
 	participant SearchOnlineMediaTool as SearchOnlineMediaTool
 	participant SearchDatabaseMediaTool as SearchDatabaseMediaTool
-	participant GenerateImage as GenerateImage
+	participant ComposeImage as ComposeImage
 	participant BlobStorage as BlobStorage
 	participant SocialMediaPublishTool as SocialMediaPublishTool
+	participant CosmosDB as CosmosDB
 	participant TraceLogger as TraceLogger
 
 
 	Client->>Orchestrator: OrchestrateContentRequest
 	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Received OrchestrateContentRequest")
-	Orchestrator->>CosmosDB: GetBrandRequest
-	CosmosDB-->>Orchestrator: GetBrandResponse (brandDocument)
+	Orchestrator->>GetBrandTool: GetBrandRequest
+	GetBrandTool->>CosmosDB: GetBrandRequest
+	CosmosDB-->>GetBrandTool: GetBrandResponse (brandDocument)
+	GetBrandTool-->>Orchestrator: GetBrandResponse (brandDocument)
 	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Fetched brandDocument")
-	Orchestrator->>CosmosDB: GetPostPlanRequest
-	CosmosDB-->>Orchestrator: GetPostPlanResponse (postPlanDocument)
+	Orchestrator->>GetPostPlanTool: GetPostPlanRequest
+	GetPostPlanTool->>CosmosDB: GetPostPlanRequest
+	CosmosDB-->>GetPostPlanTool: GetPostPlanResponse (postPlanDocument)
+	GetPostPlanTool-->>Orchestrator: GetPostPlanResponse (postPlanDocument)
 	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Fetched postPlanDocument")
 	Orchestrator->>CosmosDB: UpdatePostRequest (status="retrieved brand & plan")
 	CosmosDB-->>Orchestrator: UpdatePostResponse
@@ -31,6 +37,8 @@ sequenceDiagram
 	Orchestrator->>CopywriterAgent: CopywriterAgentRequest
 	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Sent CopywriterAgentRequest")
 	CopywriterAgent->>GetPostsTool: GetPostsRequest (brandId)
+	GetPostsTool->>CosmosDB: GetPostsRequest
+	CosmosDB-->>GetPostsTool: GetPostsResponse
 	GetPostsTool-->>CopywriterAgent: GetPostsResponse
 	CopywriterAgent-->>Orchestrator: CopywriterAgentResponse
 	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Received CopywriterAgentResponse")
@@ -45,9 +53,9 @@ sequenceDiagram
 	ComposerAgent->>SearchDatabaseMediaTool: SearchDatabaseMediaRequest
 	SearchDatabaseMediaTool-->>ComposerAgent: SearchDatabaseMediaResponse
 	ComposerAgent->>TraceLogger: LogEvent(runTraceId, "Searched database media")
-	ComposerAgent->>GenerateImage: GenerateImageRequest
-	GenerateImage-->>ComposerAgent: GenerateImageResponse (imageData)
-	ComposerAgent->>TraceLogger: LogEvent(runTraceId, "Generated image")
+	ComposerAgent->>ComposeImage: ComposeImageRequest
+	ComposeImage-->>ComposerAgent: ComposeImageResponse (imageData)
+	ComposerAgent->>TraceLogger: LogEvent(runTraceId, "Composed image")
 	ComposerAgent->>BlobStorage: UploadImageRequest (imageData)
 	BlobStorage-->>ComposerAgent: UploadImageResponse (imageUrl)
 	ComposerAgent->>TraceLogger: LogEvent(runTraceId, "Uploaded image to BlobStorage")

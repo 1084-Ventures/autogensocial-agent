@@ -2,5 +2,14 @@
 # The Python Worker is managed by Azure Functions platform
 # Manually managing azure-functions-worker may cause unexpected issues
 
+
 azure-functions
+azure-cosmos
 pydantic
+Pillow
+requests
+
+# For Azure AI Foundry FunctionTool and agent orchestration
+azure-identity
+azure-ai-agents
+azure-ai-projects
