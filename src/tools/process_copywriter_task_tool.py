@@ -3,11 +3,22 @@ Tool for processing copywriter tasks
 """
 import logging
 from typing import Dict, Any
+import os
+from azure.ai.agents.models import FunctionTool, Parameter
 from src.function_blueprints.agent_factory import create_copywriter_agent
 from src.specs.agents.copywriter_agent_spec import CopywriterAgentRequest
-import os
 
-async def process_copywriter_task_tool(
+process_copywriter_task_tool = FunctionTool(
+    name="process_copywriter_task",
+    description="Process a copywriter task to generate content based on brand and post plan documents",
+    parameters=[
+        Parameter(name="run_trace_id", type="string", description="The trace ID for tracking"),
+        Parameter(name="brand_document", type="object", description="The brand document containing brand guidelines and details"),
+        Parameter(name="post_plan_document", type="object", description="The post plan document containing content requirements")
+    ]
+)
+
+async def process_copywriter_task_impl(
     run_trace_id: str,
     brand_document: Dict[str, Any],
     post_plan_document: Dict[str, Any]
@@ -48,3 +59,6 @@ async def process_copywriter_task_tool(
     logging.info(f"Generated content with trace ID: {response.traceId}")
     
     return response.dict()
+
+# Attach the implementation to the tool
+process_copywriter_task_tool.implementation = process_copywriter_task_impl

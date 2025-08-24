@@ -4,9 +4,22 @@ Tool for processing publishing tasks
 import logging
 from typing import Dict, Any
 from datetime import datetime
+from azure.ai.agents.models import FunctionTool, Parameter
 from src.shared.cosmos_client import get_cosmos_container
 
-def process_publish_task_tool(
+process_publish_task_tool = FunctionTool(
+    name="process_publish_task",
+    description="Publish content by saving the generated content and image to storage and preparing for social media distribution",
+    parameters=[
+        Parameter(name="run_trace_id", type="string", description="The trace ID for tracking"),
+        Parameter(name="brand_document", type="object", description="The brand document containing brand details"),
+        Parameter(name="post_plan_document", type="object", description="The post plan document containing content plan"),
+        Parameter(name="copywriter_response", type="object", description="The response from the copywriter containing generated content"),
+        Parameter(name="generated_image_data", type="object", description="The generated image data including base64 encoded image")
+    ]
+)
+
+def process_publish_task_impl(
     run_trace_id: str,
     brand_document: Dict[str, Any],
     post_plan_document: Dict[str, Any],
@@ -49,3 +62,6 @@ def process_publish_task_tool(
         "postId": result["id"],
         "status": result["status"]
     }
+
+# Attach the implementation to the tool
+process_publish_task_tool.implementation = process_publish_task_impl

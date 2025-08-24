@@ -170,18 +170,19 @@ async def orchestrate_content_handler(req: func.HttpRequest) -> func.HttpRespons
     update_post_status(post_plan_id, "retrieved brand & plan")
     log_event(run_trace_id, "Updated post: retrieved brand & plan")
 
-    # Step 4: Queue Copywriter Task
+    # Step 4: Queue Content Generation Task
     try:
         queue_msg = {
+            "taskType": "generate_content",
             "runTraceId": run_trace_id,
             "brandDocument": brand_document,
             "postPlanDocument": post_plan_document
         }
-        copywriter_queue = get_queue_client("copywriter-tasks")
-        copywriter_queue.send_message(json.dumps(queue_msg))
-        log_event(run_trace_id, "Added task to copywriter queue")
+        content_queue = get_queue_client("content-tasks")
+        content_queue.send_message(json.dumps(queue_msg))
+        log_event(run_trace_id, "Added task to content generation queue")
     except Exception as e:
-        error_msg = f"Failed to queue copywriter task: {str(e)}"
+        error_msg = f"Failed to queue content generation task: {str(e)}"
         log_event(run_trace_id, error_msg, level="ERROR")
         return func.HttpResponse(
             OrchestrateContentErrorResponse(message=error_msg).model_dump_json(),
@@ -190,17 +191,17 @@ async def orchestrate_content_handler(req: func.HttpRequest) -> func.HttpRespons
         )
 
     # Step 5: Update post status
-    update_post_status(post_plan_id, "queued_for_copywriter")
-    log_event(run_trace_id, "Updated post: queued for copywriter")
+    update_post_status(post_plan_id, "queued_for_processing")
+    log_event(run_trace_id, "Updated post: queued for processing")
 
     # Step 6: Return OrchestrateContentResponse with task ID
     response = OrchestrateContentResponse(
         success=True,
-        message="Content generation task queued successfully",
+        message="Content generation pipeline started",
         postId=post_plan_id,
         data={
             "runTraceId": run_trace_id,
-            "status": "queued_for_copywriter"
+            "status": "processing_started"
         }
     )
     return func.HttpResponse(

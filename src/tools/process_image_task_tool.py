@@ -3,12 +3,22 @@ Tool for processing image generation tasks
 """
 import logging
 from typing import Dict, Any, Optional, List
+from azure.ai.agents.models import FunctionTool, Parameter
 from src.function_blueprints.compose_image_blueprint import compose_image
 from PIL import Image
 import io
 import base64
 
-def process_image_task_tool(
+process_image_task_tool = FunctionTool(
+    name="process_image_task",
+    description="Generate an image based on provided parameters and content requirements",
+    parameters=[
+        Parameter(name="run_trace_id", type="string", description="The trace ID for tracking"),
+        Parameter(name="image_params", type="object", description="The image generation parameters including size, background, text, and overlay settings")
+    ]
+)
+
+def process_image_task_impl(
     run_trace_id: str,
     image_params: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -48,3 +58,6 @@ def process_image_task_tool(
         "format": "PNG",
         "encoding": "base64"
     }
+
+# Attach the implementation to the tool
+process_image_task_tool.implementation = process_image_task_impl
