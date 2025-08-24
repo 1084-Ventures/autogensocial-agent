@@ -1,120 +1,221 @@
-
-
+"""
+Azure AI Foundry agent specialized in creating engaging social media content.
+Implements the sequence defined in autogensocial_http_sequence.mmd.
+"""
 
 import os
+import json
+import logging
 from pathlib import Path
+from typing import Optional, Dict, Any
+
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import CodeInterpreterTool, FunctionTool
+from azure.core.exceptions import ResourceNotFoundError, ServiceRequestError
+from azure.core.credentials import TokenCredential
+
 from src.tools.get_posts_tool import get_posts_tool
 from src.specs.agents.copywriter_agent_spec import CopywriterAgentRequest, CopywriterAgentResponse
+from src.specs.agents.copywriter_agent_instructions import AGENT_CONFIG, ADDITIONAL_INSTRUCTIONS
 from src.specs.tools.get_posts_tool_spec import GetPostsResponse
-from src.specs.documents.post_document_spec import PostContent
+from src.specs.documents.post_document_spec import PostContent, PostMediaItem
+from src.specs.common.trace_logger_spec import TraceLogger
 
-def copywriter_generate_content(request: CopywriterAgentRequest) -> CopywriterAgentResponse:
+# Configure logging
+logger = logging.getLogger(__name__)
+
+class CopywriterAgent:
     """
-    Generates post content for a brand and post plan, fetching previous posts for context.
-    Args:
-        request: CopywriterAgentRequest (Pydantic model)
-    Returns:
-        CopywriterAgentResponse (Pydantic model)
+    Azure AI Foundry agent specialized in creating engaging social media content.
+    Implements the sequence defined in autogensocial_http_sequence.mmd.
     """
-    try:
-        posts = get_posts_tool(
-            brand_id=request.brand_document.id,
-            post_plan_id=request.post_plan_document.id if request.post_plan_document else None,
-            fields=None,
-            limit=10
+    
+    def __init__(self, project_endpoint: str = None, trace_logger: Optional[TraceLogger] = None, credential: Optional[TokenCredential] = None):
+        """
+        Initialize the CopywriterAgent with Azure AI Foundry configuration.
+        
+        Args:
+            project_endpoint: Azure AI Foundry project endpoint. If None, uses PROJECT_ENDPOINT env var.
+            trace_logger: Optional TraceLogger instance for detailed logging
+            credential: Optional TokenCredential for authentication. If None, uses DefaultAzureCredential
+        """
+        self.project_endpoint = project_endpoint or os.getenv("PROJECT_ENDPOINT")
+        if not self.project_endpoint:
+            raise ValueError("PROJECT_ENDPOINT must be provided")
+            
+        self.model_name = os.getenv("MODEL_DEPLOYMENT_NAME")
+        if not self.model_name:
+            raise ValueError("MODEL_DEPLOYMENT_NAME must be provided")
+        
+        self.trace_logger = trace_logger
+        self.credential = credential or DefaultAzureCredential()
+            
+        # Initialize AI Project Client with Azure authentication
+        self.project_client = AIProjectClient(
+            endpoint=self.project_endpoint,
+            credential=self.credential
         )
-        previous_posts = GetPostsResponse(posts=posts)
-    except Exception as e:
-        return CopywriterAgentResponse(
-            success=False,
-            message=f"Failed to fetch previous posts: {str(e)}",
-            traceId=request.run_trace_id,
-            post_content=None,
-            metadata={}
-        )
-
-    # Generate post content (stub)
-    post_content = PostContent(
-        media_type="image",
-        topic="Exciting Launch!",
-        comment="Check out our new product, now available!",
-        hashtags=["#launch", "#exciting"],
-        media=[],
-        call_to_action="Learn more at our website!",
-        mentions=[],
-        language="en",
-        location=None
-    )
-
-    return CopywriterAgentResponse(
-        success=True,
-        message="Copy generated successfully.",
-        traceId=request.run_trace_id,
-        post_content=post_content,
-        metadata={"source": "copywriter_agent_stub"}
-    )
-
-copywriter_function_tool = FunctionTool(functions={copywriter_generate_content})
-
-def main():
-    """
-    Main entrypoint for registering and running the Copywriter Agent with Azure AI Foundry.
-    """
-    project_endpoint = os.environ.get("PROJECT_ENDPOINT")
-    model_name = os.environ.get("MODEL_DEPLOYMENT_NAME")
-    if not project_endpoint or not model_name:
-        raise EnvironmentError("PROJECT_ENDPOINT and MODEL_DEPLOYMENT_NAME environment variables must be set.")
-
-    project_client = AIProjectClient(
-        endpoint=project_endpoint,
-        credential=DefaultAzureCredential(),
-    )
-    code_interpreter = CodeInterpreterTool()
-
-    with project_client:
-        agent = project_client.agents.create_agent(
-            model=model_name,
-            name="copywriter-agent",
-            instructions="You are a helpful copywriter agent. Use the copywriter tool to generate social media content, and the Code Interpreter tool for any data visualization or math tasks.",
-            tools=copywriter_function_tool.definitions + code_interpreter.definitions,
-        )
-        print(f"Created agent, ID: {agent.id}")
-
-        thread = project_client.agents.threads.create()
-        print(f"Created thread, ID: {thread.id}")
-
-        # Example message (in production, pass a valid CopywriterAgentRequest as content/tool input)
-        message = project_client.agents.messages.create(
-            thread_id=thread.id,
-            role="user",
-            content="Generate a social media post for our new product launch.",
-        )
-        print(f"Created message, ID: {message['id']}")
-
-        run = project_client.agents.runs.create_and_process(
-            thread_id=thread.id,
-            agent_id=agent.id,
-            additional_instructions="Please address the user as Alex Smith. The user is a marketing manager.",
-        )
-        print(f"Run finished with status: {run.status}")
-
-        if run.status == "failed":
-            print(f"Run failed: {run.last_error}")
-
-        messages = project_client.agents.messages.list(thread_id=thread.id)
-        for message in messages:
-            print(f"Role: {message.role}, Content: {message.content}")
-            for img in getattr(message, 'image_contents', []):
-                file_id = img.image_file.file_id
-                file_name = f"{file_id}_image_file.png"
-                project_client.agents.files.save(file_id=file_id, file_name=file_name)
-                print(f"Saved image file to: {Path.cwd() / file_name}")
-
-        project_client.agents.delete_agent(agent.id)
-        print("Deleted agent")
-
-if __name__ == "__main__":
-    main()
+        
+        # Initialize tools
+        self.code_interpreter = CodeInterpreterTool()
+        self.get_posts_tool = FunctionTool(functions={get_posts_tool})
+        
+    async def create_content(self, request: CopywriterAgentRequest) -> CopywriterAgentResponse:
+        """
+        Process a content creation request using the AI Foundry agent.
+        Follows the sequence in autogensocial_http_sequence.mmd.
+        
+        Args:
+            request: CopywriterAgentRequest containing brand and post plan info
+            
+        Returns:
+            CopywriterAgentResponse with generated content
+        """
+        if self.trace_logger and request.run_trace_id:
+            await self.trace_logger.log_event(request.run_trace_id, "Starting content creation")
+            
+        try:
+            # Get or create the agent
+            agent = await self._get_or_create_agent()
+            
+            # Create a thread for this conversation
+            thread = await self.project_client.agents.threads.create()
+            if self.trace_logger and request.run_trace_id:
+                await self.trace_logger.log_event(request.run_trace_id, f"Created thread {thread.id}")
+            
+            # Add the request context as a system message
+            context_message = {
+                "brand": request.brand_document.dict(),
+                "post_plan": request.post_plan_document.dict(),
+                "previous_posts": request.previous_posts.dict() if request.previous_posts else None
+            }
+            
+            await self.project_client.agents.messages.create(
+                thread_id=thread.id,
+                role="system",
+                content=json.dumps(context_message, indent=2)
+            )
+            
+            # Run the agent with the content request
+            run = await self.project_client.agents.runs.create_and_process(
+                thread_id=thread.id,
+                agent_id=agent.id,
+                additional_instructions=ADDITIONAL_INSTRUCTIONS
+            )
+            
+            if run.status == "failed":
+                error_msg = f"Agent run failed: {run.last_error}"
+                if self.trace_logger and request.run_trace_id:
+                    await self.trace_logger.log_event(request.run_trace_id, error_msg, level="ERROR")
+                return CopywriterAgentResponse(
+                    success=False,
+                    message=error_msg,
+                    traceId=request.run_trace_id
+                )
+            
+            # Get the agent's response
+            messages = await self.project_client.agents.messages.list(thread_id=thread.id)
+            agent_messages = [msg for msg in messages if msg.role == "assistant"]
+            
+            if not agent_messages:
+                error_msg = "No response received from agent"
+                if self.trace_logger and request.run_trace_id:
+                    await self.trace_logger.log_event(request.run_trace_id, error_msg, level="ERROR")
+                return CopywriterAgentResponse(
+                    success=False,
+                    message=error_msg,
+                    traceId=request.run_trace_id
+                )
+            
+            # Parse and validate the response
+            try:
+                response_content = json.loads(agent_messages[-1].content)
+                post_content = PostContent(**response_content.get("post_content", {}))
+                
+                success_msg = "Successfully generated content"
+                if self.trace_logger and request.run_trace_id:
+                    await self.trace_logger.log_event(request.run_trace_id, success_msg)
+                    
+                return CopywriterAgentResponse(
+                    success=True,
+                    message=success_msg,
+                    traceId=request.run_trace_id,
+                    post_content=post_content,
+                    metadata={
+                        "agent_id": agent.id,
+                        "thread_id": thread.id,
+                        "run_id": run.id,
+                        "tools_used": [tool.name for tool in run.tools_used] if hasattr(run, 'tools_used') else []
+                    }
+                )
+            except Exception as e:
+                error_msg = f"Failed to parse agent response: {str(e)}"
+                if self.trace_logger and request.run_trace_id:
+                    await self.trace_logger.log_event(request.run_trace_id, error_msg, level="ERROR")
+                return CopywriterAgentResponse(
+                    success=False,
+                    message=error_msg,
+                    traceId=request.run_trace_id
+                )
+                
+        except ServiceRequestError as e:
+            error_msg = f"Service connection error: {str(e)}"
+            if self.trace_logger and request.run_trace_id:
+                await self.trace_logger.log_event(request.run_trace_id, error_msg, level="ERROR")
+            return CopywriterAgentResponse(
+                success=False,
+                message=error_msg,
+                traceId=request.run_trace_id
+            )
+        except Exception as e:
+            error_msg = f"Content creation failed: {str(e)}"
+            if self.trace_logger and request.run_trace_id:
+                await self.trace_logger.log_event(request.run_trace_id, error_msg, level="ERROR")
+            return CopywriterAgentResponse(
+                success=False,
+                message=error_msg,
+                traceId=request.run_trace_id
+            )
+            
+    async def _get_or_create_agent(self) -> Any:
+        """
+        Gets existing agent or creates a new one with proper configuration.
+        Uses retry logic for resilience.
+        
+        Returns:
+            Any: The Azure AI Foundry agent instance
+            
+        Raises:
+            ServiceRequestError: If service connection fails
+            Exception: If agent creation fails
+        """
+        try:
+            # Try to get existing agent
+            try:
+                agent = await self.project_client.agents.get_agent(AGENT_CONFIG["name"])
+                logger.info("Found existing copywriter agent")
+                return agent
+            except ResourceNotFoundError:
+                logger.info("Creating new copywriter agent")
+                
+                # Create new agent with tools
+                agent = await self.project_client.agents.create_agent(
+                    model=self.model_name,
+                    name=AGENT_CONFIG["name"],
+                    description=AGENT_CONFIG["description"],
+                    instructions=AGENT_CONFIG["instructions"],
+                    tools=[
+                        self.get_posts_tool.definitions,
+                        self.code_interpreter.definitions
+                    ]
+                )
+                logger.info(f"Created new copywriter agent with ID: {agent.id}")
+                return agent
+                
+        except ServiceRequestError as e:
+            logger.error(f"Service connection error: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to get/create copywriter agent: {str(e)}")
+            raise

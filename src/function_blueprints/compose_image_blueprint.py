@@ -1,11 +1,17 @@
 import azure.functions as func
 import base64
+import logging
+from io import BytesIO
+from typing import Optional, List, Dict, Any
+from PIL import Image, ImageDraw, ImageFont
+import requests
 
-app = func.FunctionApp()
+bp = func.Blueprint()
 
-@app.function_name(name="compose_image")
-@app.route(route="compose_image", auth_level=func.AuthLevel.FUNCTION)
-def compose_image(req: func.HttpRequest) -> func.HttpResponse:
+@bp.route(route="compose_image")
+@bp.function_name(name="compose_image")
+def compose_image_handler(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Processing compose image request')
     try:
         req_body = req.get_json()
         size = req_body.get("size")
@@ -36,10 +42,6 @@ def compose_image(req: func.HttpRequest) -> func.HttpResponse:
             f"Error: {str(e)}",
             status_code=400
         )
-from io import BytesIO
-from typing import Optional, List, Dict, Any
-from PIL import Image, ImageDraw, ImageFont
-import requests
 
 
 def parse_size(size_str: Optional[str]) -> tuple:
