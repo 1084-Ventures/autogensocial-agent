@@ -1,7 +1,7 @@
 # Azure AI Foundry SDK conventions
 import os
 from src.shared.cosmos_client import CosmosDBClient
-from azure.ai.agents.models import FunctionTool
+
 from typing import List, Optional, Dict, Any
 
 def get_posts_tool(brand_id: str, post_plan_id: Optional[str] = None, fields: Optional[List[str]] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -33,5 +33,5 @@ def get_posts_tool(brand_id: str, post_plan_id: Optional[str] = None, fields: Op
         return filtered_items
     return items
 
-# Register the function as a FunctionTool for Azure AI Foundry agents
-get_posts_function_tool = FunctionTool(functions={get_posts_tool})
+# Register the function as a dictionary-based tool for Azure AI Foundry agents
+get_posts_function_tool = get_posts_tool

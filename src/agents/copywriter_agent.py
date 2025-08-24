@@ -29,14 +29,14 @@ class ServiceError(AgentError):
 
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
-from azure.ai.agents.models import CodeInterpreterTool, FunctionTool
+
 from azure.core.exceptions import ResourceNotFoundError, ServiceRequestError
 from azure.core.credentials import TokenCredential
-from azure.core.pipeline.policies import RetryPolicy, ThrottlingRetryPolicy
+from azure.core.pipeline.policies import RetryPolicy
 from azure.core.pipeline.transport import RequestsTransport
 from functools import lru_cache
 
-from src.tools.get_posts_tool import get_posts_tool
+from src.tools.data.get_posts_tool import get_posts_tool
 from src.tools.search_online_media_tool import search_online_media_tool
 from src.tools.search_database_media_tool import search_database_media_tool
 from src.specs.agents.copywriter_agent_spec import CopywriterAgentRequest, CopywriterAgentResponse
@@ -84,11 +84,11 @@ class CopywriterAgent:
         self._validate_config()
         
         # Initialize tools
-        self.code_interpreter = CodeInterpreterTool()
-        self.get_posts_tool = FunctionTool(functions={get_posts_tool})
-        self.search_online_media_tool = FunctionTool(functions={search_online_media_tool})
-        self.search_database_media_tool = FunctionTool(functions={search_database_media_tool})
-        
+        self.code_interpreter = None  # Not supported, set to None or implement if needed
+        self.get_posts_tool = get_posts_tool
+        self.search_online_media_tool = search_online_media_tool
+        self.search_database_media_tool = search_database_media_tool
+
         # Configure policies
         self.retry_policy = RetryPolicy(
             retry_total=3,
@@ -96,17 +96,20 @@ class CopywriterAgent:
             retry_status=3,
             retry_backoff_factor=0.5
         )
-        
-        self.throttling_policy = ThrottlingRetryPolicy(
-            max_attempts=5,
-            retry_backoff_factor=2
+
+        self.throttling_policy = RetryPolicy(
+            retry_total=5,
+            retry_read=5,
+            retry_status=5,
+            retry_backoff_factor=2,
+            retry_on_status_codes=[429, 503]  # 429 for throttling, 503 for service unavailable
         )
-        
+
         # Configure transport with policies
         self.transport = RequestsTransport(
             policies=[self.retry_policy, self.throttling_policy]
         )
-        
+
         # Initialize rate limiting
         self.request_semaphore = asyncio.Semaphore(10)  # Max 10 concurrent requests
         
@@ -371,10 +374,9 @@ class CopywriterAgent:
                     "description": AGENT_CONFIG["description"],
                     "instructions": AGENT_CONFIG["instructions"],
                     "tools": [
-                        self.get_posts_tool.definitions,
-                        self.search_online_media_tool.definitions,
-                        self.search_database_media_tool.definitions,
-                        self.code_interpreter.definitions
+                        self.get_posts_tool,
+                        self.search_online_media_tool,
+                        self.search_database_media_tool
                     ]
                 }
                 

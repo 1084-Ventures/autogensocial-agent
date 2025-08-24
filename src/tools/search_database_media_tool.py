@@ -3,16 +3,32 @@ Tool for searching media in the database.
 """
 import logging
 from typing import List, Dict, Any
-from azure.ai.agents.models import FunctionTool, Parameter
+
 from src.shared.cosmos_client import get_cosmos_container
 
-search_database_media_tool = FunctionTool(
-    name="search_database_media",
-    description="Search for media assets in the database using tags and descriptions",
-    parameters=[
-        Parameter(name="query", type="string", description="The search query to find media assets")
-    ]
-)
+
+def search_database_media_impl(query: str):
+    # Implementation logic here (see below)
+    try:
+        container = get_cosmos_container('media')
+        query_str = f"SELECT * FROM c WHERE CONTAINS(c.tags, '{query}') OR CONTAINS(c.description, '{query}')"
+        items = list(container.query_items(
+            query=query_str,
+            enable_cross_partition_query=True
+        ))
+        return items
+    except Exception as e:
+        logging.error(f"Failed to search database media: {str(e)}")
+        return []
+
+search_database_media_tool = {
+    "name": "search_database_media",
+    "description": "Search for media assets in the database using tags and descriptions",
+    "parameters": {
+        "query": {"type": "string", "description": "The search query to find media assets"}
+    },
+    "implementation": search_database_media_impl
+}
 
 def search_database_media_impl(query: str) -> List[Dict[str, Any]]:
     """
@@ -38,4 +54,3 @@ def search_database_media_impl(query: str) -> List[Dict[str, Any]]:
         return []
 
 # Attach the implementation to the tool
-search_database_media_tool.implementation = search_database_media_impl

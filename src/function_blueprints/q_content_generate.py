@@ -1,6 +1,5 @@
-"""
-Queue handler for content generation tasks
-"""
+# Queue handler for content generation tasks
+
 import azure.functions as func
 import json
 import logging

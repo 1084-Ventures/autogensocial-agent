@@ -1,6 +1,5 @@
-"""
-Queue handler for post publishing tasks
-"""
+# Queue handler for post publishing tasks
+
 import azure.functions as func
 import json
 import logging

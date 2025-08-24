@@ -1,29 +1,115 @@
 import azure.functions as func
-from src.specs.functions.orchestrate_content_spec import OrchestrateContentRequest, OrchestrateContentResponse, OrchestrateContentErrorResponse
-from src.tools.get_brand_tool import get_brand_tool
-from src.tools.get_post_plan_tool import get_post_plan_tool
-from src.specs.common.trace_logger_spec import TraceLogEvent
-from src.shared.queue_client import get_queue_client
 import json
+import logging
 import os
 import time
-import logging
 from datetime import datetime
+from src.specs.functions.orchestrate_content_spec import (
+    OrchestrateContentRequest,
+    OrchestrateContentResponse,
+    OrchestrateContentErrorResponse
+)
+from src.tools.data.get_brand_tool import get_brand_tool
+from src.tools.data.get_post_plan_tool import get_post_plan_tool
+from src.specs.common.trace_logger_spec import TraceLogEvent
+from src.shared.queue_client import get_queue_client
+from src.shared.trace_logger import AzureTraceLogger
 
 bp = func.Blueprint()
 
-def log_event(run_trace_id: str, event: str, level: str = "INFO", data: dict = None):
-    """Log an event using TraceLogEvent model."""
-    trace_event = TraceLogEvent(
-        runTraceId=run_trace_id,
-        event=event,
-        timestamp=datetime.utcnow(),
-        level=level,
-        data=data
+def error_response(message: str, status_code: int = 400, error_code: str = "BAD_REQUEST") -> func.HttpResponse:
+    """Create a standardized error response"""
+    return func.HttpResponse(
+        json.dumps({
+            "success": False,
+            "message": message,
+            "errorCode": error_code
+        }),
+        status_code=status_code,
+        mimetype="application/json"
     )
-    log_func = getattr(logging, level.lower(), logging.info)
-    log_func(f"{trace_event.event} - Trace ID: {trace_event.runTraceId}")
 
+async def log_event(run_trace_id: str, event: str, level: str = "INFO", details: dict = None):
+    """Log an event using TraceLogEvent and AzureTraceLogger"""
+    logger = AzureTraceLogger(run_trace_id)
+    await logger.log_event(
+        phase=event,
+        status=level,
+        details=details
+    )
+    
+    # Also log to Application Insights
+    log_func = logging.info if level == "INFO" else logging.error
+    log_func(f"{event} - Trace ID: {run_trace_id}")
+    if details:
+        log_func(f"Details: {json.dumps(details)}")
+
+@bp.function_name("orchestrate_content")
+@bp.route(route="orchestrate_content", auth_level=func.AuthLevel.FUNCTION)
+async def orchestrate_content(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP trigger to start the content orchestration process.
+    Validates input, checks documents, and enqueues the first content generation task.
+    """
+    try:
+        # Parse request
+        request = OrchestrateContentRequest(**req.get_json())
+        run_trace_id = f"run-{int(time.time())}"
+        
+        # Log received
+        await log_event(run_trace_id, "REQUEST_RECEIVED", details={
+            "brandId": request.brandId,
+            "postPlanId": request.payload.get("postPlanId")
+        })
+        
+        # Validate brand document
+        brand_result = await get_brand_tool(request.brandId)
+        if brand_result["status"] != "completed":
+            await log_event(run_trace_id, "BRAND_NOT_FOUND", "ERROR", brand_result["error"])
+            return error_response(
+                f"Brand not found: {request.brandId}",
+                status_code=404,
+                error_code="BRAND_NOT_FOUND"
+            )
+            
+        # Validate post plan document
+        post_plan_result = await get_post_plan_tool(request.payload["postPlanId"])
+        if post_plan_result["status"] != "completed":
+            await log_event(run_trace_id, "POST_PLAN_NOT_FOUND", "ERROR", post_plan_result["error"])
+            return error_response(
+                f"Post plan not found: {request.payload['postPlanId']}",
+                status_code=404,
+                error_code="POST_PLAN_NOT_FOUND"
+            )
+            
+        # Queue content generation task
+        content_queue = get_queue_client("content-tasks")
+        queue_msg = {
+            "runTraceId": run_trace_id,
+            "brandId": request.brandId,
+            "postPlanId": request.payload["postPlanId"],
+            "step": "generate_content"
+        }
+        content_queue.send_message(json.dumps(queue_msg))
+        
+        await log_event(run_trace_id, "TASK_QUEUED", details=queue_msg)
+        
+        # Return success response
+        return func.HttpResponse(
+            json.dumps({
+                "success": True,
+                "runTraceId": run_trace_id,
+                "message": "Content generation task queued successfully"
+            }),
+            status_code=202,
+            mimetype="application/json"
+        )
+            
+    except ValueError as e:
+        return error_response(str(e), error_code="VALIDATION_ERROR")
+    except Exception as e:
+        logging.exception("Orchestration failed")
+        return error_response(str(e), status_code=500, error_code="INTERNAL_ERROR")
 
 def update_post_status(post_id, status):
     # Stub for Cosmos DB update
@@ -68,8 +154,8 @@ async def call_copywriter_agent(brand_document, post_plan_document, run_trace_id
         logging.error(error_msg)
         raise RuntimeError(error_msg)
 
-@bp.route(route="orchestrate_content")
-@bp.function_name(name="orchestrate_content")
+@bp.route(route="orchestrate_content_handler")
+@bp.function_name(name="orchestrate_content_handler")
 async def orchestrate_content_handler(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Processing orchestrate content request')
     
