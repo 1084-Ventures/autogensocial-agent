@@ -136,3 +136,6 @@ __azurite_db*__.json
 
 # Apple
 .DS_Store
+
+# Local runtime state (dev-only)
+.runtime/
