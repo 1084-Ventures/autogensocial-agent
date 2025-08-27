@@ -3,73 +3,56 @@ id: 16629962-bb60-4718-ad83-7da6c0705c9e
 ---
 
 sequenceDiagram
-	participant Client as Client (Postman)
-	participant Orchestrator as Orchestrator (orchestrate_content)
-	participant GetBrandTool as GetBrandTool
-	participant GetPostPlanTool as GetPostPlanTool
-	participant GetPostsTool as GetPostsTool
-	participant CopywriterAgent as CopywriterAgent
-	participant ComposerAgent as ComposerAgent
-	participant SearchOnlineMediaTool as SearchOnlineMediaTool
-	participant SearchDatabaseMediaTool as SearchDatabaseMediaTool
-	participant ComposeImage as ComposeImage
-	participant BlobStorage as BlobStorage
-	participant SocialMediaPublishTool as SocialMediaPublishTool
-	participant CosmosDB as CosmosDB
-	participant TraceLogger as TraceLogger
+    participant Client as Client (HTTP)
+    participant Starter as HTTP Starter (/orchestrate_content)
+    participant Status as HTTP Status (/check_task_status)
+    participant ContentQ as content-tasks (Queue)
+    participant MediaQ as media-tasks (Queue)
+    participant PublishQ as publish-tasks (Queue)
+    participant Copywriter as CopywriterAgentWorker
+    participant Composer as ComposerImageAgentWorker
+    participant Publisher as PublishWorker
+    participant Cosmos as Cosmos DB
+    participant Blob as Blob Storage
+    participant Trace as TraceLogger
 
+    %% --- Step 0: Kickoff ---
+    Client->>Starter: OrchestrateContentRequest { brandId, postPlanId }
+    Starter->>Trace: Log(runTraceId, "received")
+    Starter->>Cosmos: Read brand + plan (validate IDs)
+    Starter->>Cosmos: Upsert agentRuns { runTraceId, phase:"start", status:"received" }
+    Starter->>ContentQ: Enqueue { runTraceId, brandId, postPlanId, step:"generate_content" }
+    Starter-->>Client: 202 Accepted { runTraceId }
 
-	Client->>Orchestrator: OrchestrateContentRequest
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Received OrchestrateContentRequest")
-	Orchestrator->>GetBrandTool: GetBrandRequest
-	GetBrandTool->>CosmosDB: GetBrandRequest
-	CosmosDB-->>GetBrandTool: GetBrandResponse (brandDocument)
-	GetBrandTool-->>Orchestrator: GetBrandResponse (brandDocument)
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Fetched brandDocument")
-	Orchestrator->>GetPostPlanTool: GetPostPlanRequest
-	GetPostPlanTool->>CosmosDB: GetPostPlanRequest
-	CosmosDB-->>GetPostPlanTool: GetPostPlanResponse (postPlanDocument)
-	GetPostPlanTool-->>Orchestrator: GetPostPlanResponse (postPlanDocument)
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Fetched postPlanDocument")
-	Orchestrator->>CosmosDB: UpdatePostRequest (status="retrieved brand & plan")
-	CosmosDB-->>Orchestrator: UpdatePostResponse
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Updated post: retrieved brand & plan")
-	Orchestrator->>CopywriterAgent: CopywriterAgentRequest
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Sent CopywriterAgentRequest")
-	CopywriterAgent->>GetPostsTool: GetPostsRequest (brandId)
-	GetPostsTool->>CosmosDB: GetPostsRequest
-	CosmosDB-->>GetPostsTool: GetPostsResponse
-	GetPostsTool-->>CopywriterAgent: GetPostsResponse
-	CopywriterAgent-->>Orchestrator: CopywriterAgentResponse
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Received CopywriterAgentResponse")
-	Orchestrator->>CosmosDB: UpdatePostRequest (status="copywriter complete")
-	CosmosDB-->>Orchestrator: UpdatePostResponse
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Updated post: copywriter complete")
-	Orchestrator->>ComposerAgent: ComposerAgentRequest
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Sent ComposerAgentRequest")
-	ComposerAgent->>SearchOnlineMediaTool: SearchOnlineMediaRequest
-	SearchOnlineMediaTool-->>ComposerAgent: SearchOnlineMediaResponse
-	ComposerAgent->>TraceLogger: LogEvent(runTraceId, "Searched online media")
-	ComposerAgent->>SearchDatabaseMediaTool: SearchDatabaseMediaRequest
-	SearchDatabaseMediaTool-->>ComposerAgent: SearchDatabaseMediaResponse
-	ComposerAgent->>TraceLogger: LogEvent(runTraceId, "Searched database media")
-	ComposerAgent->>ComposeImage: ComposeImageRequest
-	ComposeImage-->>ComposerAgent: ComposeImageResponse (imageData)
-	ComposerAgent->>TraceLogger: LogEvent(runTraceId, "Composed image")
-	ComposerAgent->>BlobStorage: UploadImageRequest (imageData)
-	BlobStorage-->>ComposerAgent: UploadImageResponse (imageUrl)
-	ComposerAgent->>TraceLogger: LogEvent(runTraceId, "Uploaded image to BlobStorage")
-	ComposerAgent-->>Orchestrator: ComposerAgentResponse
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Received ComposerAgentResponse")
-	Orchestrator->>CosmosDB: UpdatePostRequest (status="composer complete")
-	CosmosDB-->>Orchestrator: UpdatePostResponse
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Updated post: composer complete")
-	Orchestrator->>SocialMediaPublishTool: PublishPostRequest (postData)
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Sent PublishPostRequest")
-	SocialMediaPublishTool-->>Orchestrator: PublishPostResponse (success)
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Received PublishPostResponse")
-	Orchestrator->>CosmosDB: UpdatePostRequest (status="published")
-	CosmosDB-->>Orchestrator: UpdatePostResponse
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Updated post: published")
-	Orchestrator-->>Client: OrchestrateContentResponse
-	Orchestrator->>TraceLogger: LogEvent(runTraceId, "Sent OrchestrateContentResponse")
+    %% --- Step 1: Copywriter ---
+    ContentQ-->>Copywriter: Dequeue { step:"generate_content" }
+    Copywriter->>Trace: Log(runTraceId, "copywriter:start")
+    Copywriter->>Cosmos: Read brand/plan (as needed)
+    Copywriter->>Cosmos: Upsert contentRef + caption/hashtags
+    Copywriter->>Cosmos: Upsert agentRuns { phase:"copywriter", status:"completed" }
+    Copywriter->>MediaQ: Enqueue { runTraceId, brandId, postPlanId, step:"generate_image", refs:{ contentRef } }
+    Copywriter->>Trace: Log(runTraceId, "copywriter:enqueued_image")
+
+    %% --- Step 2: Image Composer ---
+    MediaQ-->>Composer: Dequeue { step:"generate_image", refs:{ contentRef } }
+    Composer->>Trace: Log(runTraceId, "composer-image:start")
+    Composer->>Cosmos: Read contentRef
+    Composer->>Blob: Create/store image from prompt
+    Blob-->>Composer: mediaRef (blob URL)
+    Composer->>Cosmos: Upsert mediaRef on post/run
+    Composer->>Cosmos: Upsert agentRuns { phase:"image", status:"completed" }
+    Composer->>PublishQ: Enqueue { runTraceId, brandId, postPlanId, step:"publish", refs:{ contentRef, mediaRef } }
+    Composer->>Trace: Log(runTraceId, "composer-image:enqueued_publish")
+
+    %% --- Step 3: Publish ---
+    PublishQ-->>Publisher: Dequeue { step:"publish", refs:{ contentRef, mediaRef } }
+    Publisher->>Trace: Log(runTraceId, "publish:start")
+    Publisher->>Cosmos: Upsert final "posts" doc (caption + mediaRef + links)
+    Publisher->>Cosmos: Upsert agentRuns { phase:"publish", status:"completed" }
+    Publisher->>Trace: Log(runTraceId, "publish:done")
+
+    %% --- Status polling (client-driven) ---
+    Client->>Status: GET /check_task_status?runTraceId=...
+    Status->>Cosmos: Read agentRuns + posts for runTraceId
+    Cosmos-->>Status: Progress + post doc (if available)
+    Status-->>Client: StatusResponse { phase, status, postSummary? }
