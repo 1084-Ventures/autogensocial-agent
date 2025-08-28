@@ -1,6 +1,7 @@
 import json
 import os
 from typing import Any, Optional
+from time import perf_counter
 
 import azure.functions as func
 
@@ -11,7 +12,7 @@ except Exception:  # pragma: no cover
 
 from src.specs.queue.message import QueueMessage
 from src.shared.state import RunStateStore
-from src.shared.logging_utils import info as log_info
+from src.shared.logging_utils import info as log_info, error as log_error
 from src.agents.image_agent_foundry import FoundryImageAgent
 from src.specs.agents.image import ImageAgentInput
 from src.tools.image_creation_tools import call_function_tool as call_image_tool
@@ -95,9 +96,12 @@ def _generate_image_via_agent(
     connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> None:
+    start = perf_counter()
     body = msg.get_body().decode("utf-8")
     data = json.loads(body)
     q = QueueMessage(**data)
+
+    log_info(q.runTraceId, "queue:dequeued", queue="media-tasks", messageId=getattr(msg, "id", None))
 
     # Mark phase start
     RunStateStore.set_status(
@@ -107,11 +111,11 @@ def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> No
         brand_id=q.brandId,
         post_plan_id=q.postPlanId,
     )
-    log_info(q.runTraceId, "composer-image:start", brandId=q.brandId, postPlanId=q.postPlanId)
+    log_info(q.runTraceId, "image:start", brandId=q.brandId, postPlanId=q.postPlanId)
     try:
         RunStateStore.add_event(q.runTraceId, phase="image", action="start")  # type: ignore[attr-defined]
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="start", error=str(exc))
 
     # Generate, upload, and persist image
     content_ref = (q.refs or {}).get("contentRef") if isinstance(q.refs, dict) else getattr(q.refs, "contentRef", None)
@@ -142,13 +146,18 @@ def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> No
                 action="fallback_generate",
                 message=str(exc),
             )  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        except Exception as exc2:
+            log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="fallback_generate", error=str(exc2))
 
     try:
-        RunStateStore.add_event(q.runTraceId, phase="image", action="agent_output", data={"mediaRef": result.get("mediaRef"), "url": result.get("url")})  # type: ignore[attr-defined]
-    except Exception:
-        pass
+        RunStateStore.add_event(
+            q.runTraceId,
+            phase="image",
+            action="agent_output",
+            data={"mediaRef": result.get("mediaRef"), "url": result.get("url")},
+        )  # type: ignore[attr-defined]
+    except Exception as exc:
+        log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="agent_output", error=str(exc))
 
     # Mark phase complete
     RunStateStore.set_status(
@@ -159,11 +168,12 @@ def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> No
         brand_id=q.brandId,
         post_plan_id=q.postPlanId,
     )
-    log_info(q.runTraceId, "composer-image:completed")
+    duration_ms = int((perf_counter() - start) * 1000)
+    log_info(q.runTraceId, "image:completed", durationMs=duration_ms)
     try:
         RunStateStore.add_event(q.runTraceId, phase="image", action="completed")  # type: ignore[attr-defined]
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="completed", error=str(exc))
 
     # Enqueue publish
     next_msg = QueueMessage(
@@ -175,7 +185,7 @@ def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> No
         refs={"contentRef": content_ref, "mediaRef": result["mediaRef"]},
     )
     publish_queue.set(next_msg.model_dump_json())
-    log_info(q.runTraceId, "composer-image:enqueued_publish")
+    log_info(q.runTraceId, "image:enqueued_publish")
     try:
         RunStateStore.add_event(
             q.runTraceId,
@@ -183,5 +193,5 @@ def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> No
             action="enqueued_next",
             data={"next": "publish-tasks", "step": "publish", "mediaRef": result.get("mediaRef")},
         )  # type: ignore[attr-defined]
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="enqueued_next", error=str(exc))
