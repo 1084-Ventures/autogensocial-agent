@@ -22,9 +22,10 @@ from src.tools.get_brand_tool import FUNCTION_TOOL as BRAND_TOOL, call_function_
 from src.tools.get_post_plan_tool import FUNCTION_TOOL as PLAN_TOOL, call_function_tool as call_plan
 from src.shared.logging_utils import info as log_info
 from src.shared.retry_utils import retry_with_backoff
+from .base import Agent
 
 
-class FoundryCopywriterAgent:
+class FoundryCopywriterAgent(Agent):
     """Copywriter agent using Azure AI Foundry Agents SDK (AIProjectClient).
 
     Registers function tools (get_brand, get_post_plan), runs the agent, handles
@@ -33,6 +34,7 @@ class FoundryCopywriterAgent:
     """
 
     def __init__(self, *, model: Optional[str] = None) -> None:
+        super().__init__()
         if AIProjectClient is None or DefaultAzureCredential is None:
             raise RuntimeError(
                 "Azure AI Foundry Agents SDK not available. Install 'azure-ai-projects' and 'azure-identity'."

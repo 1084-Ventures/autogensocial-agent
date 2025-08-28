@@ -17,9 +17,10 @@ from src.tools.get_post_plan_tool import FUNCTION_TOOL as PLAN_TOOL, call_functi
 from src.tools.search_images_tool import FUNCTION_TOOL as SEARCH_TOOL, call_function_tool as call_search
 from src.tools.image_creation_tools import FUNCTION_TOOLS as IMG_TOOLS, call_function_tool as call_img_tool
 from src.shared.retry_utils import retry_with_backoff
+from .base import Agent
 
 
-class FoundryImageAgent:
+class FoundryImageAgent(Agent):
     """Agent that selects the best image for a post.
 
     - Can search the web for candidate images
@@ -29,6 +30,7 @@ class FoundryImageAgent:
     """
 
     def __init__(self, *, model: Optional[str] = None) -> None:
+        super().__init__()
         if AIProjectClient is None or DefaultAzureCredential is None:
             raise RuntimeError(
                 "Azure AI Foundry Agents SDK not available. Install 'azure-ai-projects' and 'azure-identity'."

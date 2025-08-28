@@ -9,6 +9,7 @@ from src.specs.agents.image import ImageAgentInput
 from src.specs.agents.publish import PublishInput, PublishOutput
 from src.shared.cosmos_utils import get_cosmos_container
 from src.shared.logging_utils import info as log_info, error as log_error
+from src.tools.get_post_plan_tool import get_post_plan
 
 
 def generate_content_with_agent(run_trace_id: str, brand_id: str, post_plan_id: str) -> dict:
@@ -86,6 +87,30 @@ def generate_image_via_agent(
         "url": out.url,
         "provider": getattr(out, "provider", None),
     }
+
+
+def load_post_plan(*, brand_id: str, post_plan_id: str) -> dict:
+    """Fetch the post plan document to drive orchestration decisions."""
+
+    resp = get_post_plan(brand_id, post_plan_id)
+    return resp.document or {}
+
+
+def post_to_channel(channel: str, publish: PublishInput) -> dict:
+    """Stub for posting to a specific social media channel.
+
+    A real implementation would call the platform API. For now we log and
+    return a simple status payload.
+    """
+
+    log_info(
+        publish.runTraceId,
+        "social:post",  # event name
+        channel=channel,
+        brandId=publish.brandId,
+        postPlanId=publish.postPlanId,
+    )
+    return {"channel": channel, "status": "posted"}
 
 
 def persist_publish(data: PublishInput) -> PublishOutput:
