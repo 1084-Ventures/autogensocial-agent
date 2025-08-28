@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
+from time import perf_counter
 import azure.functions as func
 
 try:
@@ -11,7 +12,7 @@ except Exception:  # pragma: no cover
 
 from src.specs.queue.message import QueueMessage
 from src.shared.state import RunStateStore
-from src.shared.logging_utils import info as log_info
+from src.shared.logging_utils import info as log_info, error as log_error
 
 
 bp = func.Blueprint()
@@ -60,7 +61,7 @@ def _persist_publish(
                 pass
         except Exception as exc:
             try:
-                log_info(run_trace_id, "cosmos:posts:upsert_failed", postId=post_id, error=str(exc))
+                log_error(run_trace_id, "cosmos:posts:upsert_failed", postId=post_id, error=str(exc))
             except Exception:
                 pass
     return {"postId": post_id, "publishedAtUtc": published_at, "contentRef": content_ref, "mediaRef": media_ref}
@@ -73,9 +74,12 @@ def _persist_publish(
     connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 def q_publish_post(msg: func.QueueMessage) -> None:
+    start = perf_counter()
     body = msg.get_body().decode("utf-8")
     data = json.loads(body)
     q = QueueMessage(**data)
+
+    log_info(q.runTraceId, "queue:dequeued", queue="publish-tasks", messageId=getattr(msg, "id", None))
 
     # Mark phase start
     RunStateStore.set_status(
@@ -88,8 +92,8 @@ def q_publish_post(msg: func.QueueMessage) -> None:
     log_info(q.runTraceId, "publish:start", brandId=q.brandId, postPlanId=q.postPlanId)
     try:
         RunStateStore.add_event(q.runTraceId, phase="publish", action="start")  # type: ignore[attr-defined]
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="start", error=str(exc))
 
     # Publish
     content_ref = (q.refs or {}).get("contentRef") if isinstance(q.refs, dict) else getattr(q.refs, "contentRef", None)
@@ -108,8 +112,8 @@ def q_publish_post(msg: func.QueueMessage) -> None:
             action="published",
             data={"postId": result.get("postId"), "contentRef": content_ref, "mediaRef": media_ref},
         )  # type: ignore[attr-defined]
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="published", error=str(exc))
 
     # Mark complete
     RunStateStore.set_status(
@@ -120,8 +124,14 @@ def q_publish_post(msg: func.QueueMessage) -> None:
         brand_id=q.brandId,
         post_plan_id=q.postPlanId,
     )
-    log_info(q.runTraceId, "publish:completed", postId=result.get("postId"))
+    duration_ms = int((perf_counter() - start) * 1000)
+    log_info(q.runTraceId, "publish:completed", postId=result.get("postId"), durationMs=duration_ms)
     try:
-        RunStateStore.add_event(q.runTraceId, phase="publish", action="completed", data={"postId": result.get("postId")})  # type: ignore[attr-defined]
-    except Exception:
-        pass
+        RunStateStore.add_event(
+            q.runTraceId,
+            phase="publish",
+            action="completed",
+            data={"postId": result.get("postId")},
+        )  # type: ignore[attr-defined]
+    except Exception as exc:
+        log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="completed", error=str(exc))

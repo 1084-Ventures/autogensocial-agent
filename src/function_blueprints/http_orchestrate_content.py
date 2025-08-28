@@ -1,6 +1,7 @@
 import json
 import uuid
 from datetime import datetime, timezone
+from time import perf_counter
 import azure.functions as func
 
 from src.specs.http.orchestrate_content import (
@@ -10,7 +11,7 @@ from src.specs.http.orchestrate_content import (
 )
 from src.specs.queue.message import QueueMessage
 from src.shared.state import RunStateStore
-from src.shared.logging_utils import info as log_info
+from src.shared.logging_utils import info as log_info, error as log_error
 
 
 bp = func.Blueprint()
@@ -24,9 +25,11 @@ bp = func.Blueprint()
     connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> func.HttpResponse:
+    start = perf_counter()
     try:
         data = req.get_json()
     except ValueError:
+        log_error(None, "orchestrate:invalid_json")
         err = ErrorResponse(message="Invalid JSON body")
         return func.HttpResponse(
             body=err.model_dump_json(),
@@ -37,6 +40,7 @@ def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> 
     try:
         parsed = OrchestrateContentRequest(**data)
     except Exception as ex:
+        log_error(None, "orchestrate:invalid_request", error=str(ex))
         err = ErrorResponse(message=f"Invalid request: {str(ex)}")
         return func.HttpResponse(
             body=err.model_dump_json(),
@@ -57,9 +61,14 @@ def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> 
     )
     log_info(run_trace_id, "orchestrate:accepted", brandId=parsed.brandId, postPlanId=parsed.postPlanId)
     try:
-        RunStateStore.add_event(run_trace_id, phase="orchestrate", action="accepted", data={"brandId": parsed.brandId, "postPlanId": parsed.postPlanId})  # type: ignore[attr-defined]
-    except Exception:
-        pass
+        RunStateStore.add_event(
+            run_trace_id,
+            phase="orchestrate",
+            action="accepted",
+            data={"brandId": parsed.brandId, "postPlanId": parsed.postPlanId},
+        )  # type: ignore[attr-defined]
+    except Exception as exc:
+        log_error(run_trace_id, "run_state:add_event_failed", phase="orchestrate", action="accepted", error=str(exc))
 
     # Enqueue first step: generate_content
     qmsg = QueueMessage(
@@ -70,11 +79,17 @@ def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> 
         agent="copywriter",
     )
     content_queue.set(qmsg.model_dump_json())
-    log_info(run_trace_id, "orchestrate:enqueued_content")
+    duration_ms = int((perf_counter() - start) * 1000)
+    log_info(run_trace_id, "orchestrate:enqueued_content", durationMs=duration_ms)
     try:
-        RunStateStore.add_event(run_trace_id, phase="orchestrate", action="enqueued_next", data={"next": "content-tasks", "step": "generate_content"})  # type: ignore[attr-defined]
-    except Exception:
-        pass
+        RunStateStore.add_event(
+            run_trace_id,
+            phase="orchestrate",
+            action="enqueued_next",
+            data={"next": "content-tasks", "step": "generate_content"},
+        )  # type: ignore[attr-defined]
+    except Exception as exc:
+        log_error(run_trace_id, "run_state:add_event_failed", phase="orchestrate", action="enqueued_next", error=str(exc))
 
     resp = OrchestrateContentResponse(accepted=True, runTraceId=run_trace_id)
     return func.HttpResponse(
