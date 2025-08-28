@@ -4,11 +4,11 @@ A serverless Azure Functions app for automated social media content generation a
 
 ## Features
 
-- Content Generation: Create engaging social media posts using Azure AI Foundry Agents SDK
-- Media Generation: Generate and process images for social media posts
-- Content Publishing: Queue and manage post publishing
-- Queue-based Orchestration: Reliable task processing with retries and error handling
-- Observability: Comprehensive logging to Application Insights and Cosmos DB
+ - Content Generation: Create engaging social media posts using Azure AI Foundry Agents SDK
+ - Media Generation: Generate and process images for social media posts
+ - Content Publishing: Managed publishing workflow
+ - Durable Orchestration: Statefully coordinate content, media, and publish steps
+ - Observability: Comprehensive logging to Application Insights and Cosmos DB
 
 ## Local Development
 
@@ -57,10 +57,6 @@ az account set --subscription "<your-subscription-name-or-id>"
     # Single source of truth for Functions host as well
     "AzureWebJobsStorage": "%AZURE_STORAGE_CONNECTION_STRING%",
 
-    # Queue names (override to customize without code changes)
-    "CONTENT_TASKS_QUEUE": "content-tasks",
-    "MEDIA_TASKS_QUEUE": "media-tasks",
-    "PUBLISH_TASKS_QUEUE": "publish-tasks",
     # Optional: Application Insights
     "APPLICATIONINSIGHTS_CONNECTION_STRING": "your-appinsights-connection-string",
     
@@ -98,7 +94,7 @@ func start
 ```
 
 Notes:
-- Queues bind via `AZURE_STORAGE_CONNECTION_STRING`. The Functions host also uses storage via `AzureWebJobsStorage`, which here references `%AZURE_STORAGE_CONNECTION_STRING%` to avoid duplication.
+- Durable Functions require a storage account. The Functions host uses `AzureWebJobsStorage`, which in the sample settings references `%AZURE_STORAGE_CONNECTION_STRING%` to avoid duplication.
 - If you prefer Azurite locally, start it and set:
   - `AZURE_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true`
   - `AzureWebJobsStorage=UseDevelopmentStorage=true`
@@ -112,21 +108,22 @@ Azure AI Foundry Agents require authentication via `DefaultAzureCredential`. Loc
 ### Components
 
 - **Agent**: FoundryCopywriterAgent - Manages Azure AI Foundry Agent interactions and tool registration
-- **Functions**: HTTP endpoints and queue triggers for orchestration
+- **Functions**: HTTP endpoints and durable orchestrations for workflow coordination
 - **Tools**: Core business logic implementations with standardized interfaces
 
-### Queue Pipeline
+### Durable Pipeline
 
-1. `CONTENT_TASKS_QUEUE` (default: `content-tasks`): Content generation
-2. `MEDIA_TASKS_QUEUE` (default: `media-tasks`): Image generation
-3. `PUBLISH_TASKS_QUEUE` (default: `publish-tasks`): Publishing
-4. `error-tasks` (optional): Error handling
+The function app uses Azure Durable Functions to orchestrate the full content workflow. The orchestrator executes three sequential activities:
+
+1. Generate post content
+2. Create accompanying media
+3. Persist the published post
 
 ### Observability
 
-- Application Insights logging
-- Cosmos DB trace storage (agentRuns container)
-- Queue message tracking
+ - Application Insights logging
+ - Cosmos DB trace storage (agentRuns container)
+ - Durable instance tracking
 
 #### Logging
 
@@ -153,23 +150,21 @@ Azure AI Foundry Agents require authentication via `DefaultAzureCredential`. Loc
    }
    ```
 
-2. **Queue Messages**:
-   - Keep messages small (pass IDs, not full documents)
+2. **Activity Payloads**:
+   - Keep payloads small (pass IDs, not full documents)
    - Include tracing information
    ```python
    {
      "runTraceId": str,
      "brandId": str,
-     "postPlanId": str,
-     "step": str,
-     "previous": {...}  # Optional link to prior step
+     "postPlanId": str
    }
    ```
 
 3. **Error Handling**:
   - Use proper exception types
   - Log with context
-  - Queue error tasks for retry/notification
+  - Surface errors through the run state store
 
 ## Agents
 
