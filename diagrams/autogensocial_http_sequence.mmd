@@ -5,56 +5,41 @@ id: 16629962-bb60-4718-ad83-7da6c0705c9e
 sequenceDiagram
     participant Client as Client (HTTP)
     participant Starter as HTTP Starter (/orchestrate_content)
+    participant Orchestrator as Durable Orchestrator
+    participant Content as generate_content activity
+    participant Image as generate_image activity
+    participant Publish as publish_post activity
     participant Status as HTTP Status (/check_task_status)
-    participant ContentQ as CONTENT_TASKS_QUEUE (Queue)
-    participant MediaQ as MEDIA_TASKS_QUEUE (Queue)
-    participant PublishQ as PUBLISH_TASKS_QUEUE (Queue)
-    participant Copywriter as CopywriterAgentWorker
-    participant Composer as ComposerImageAgentWorker
-    participant Publisher as PublishWorker
     participant Cosmos as Cosmos DB
     participant Blob as Blob Storage
     participant Trace as TraceLogger
 
-    Note over Starter,Status: Queue names are configured via app settings\nCONTENT_TASKS_QUEUE, MEDIA_TASKS_QUEUE, PUBLISH_TASKS_QUEUE
+    Note over Starter,Status: Client receives `instanceId` and polls status endpoint
 
-    %% --- Step 0: Kickoff ---
-    Client->>Starter: OrchestrateContentRequest { brandId, postPlanId }
-    Starter->>Trace: Log(runTraceId, "received")
-    Starter->>Cosmos: Read brand + plan (validate IDs)
-    Starter->>Cosmos: Upsert agentRuns { runTraceId, phase:"start", status:"received" }
-    Starter->>ContentQ: Enqueue { runTraceId, brandId, postPlanId, step:"generate_content" }
-    Starter-->>Client: 202 Accepted { runTraceId }
+    Client->>Starter: POST { brandId, postPlanId }
+    Starter->>Orchestrator: start_new(instanceId)
+    Starter-->>Client: 202 Accepted { instanceId }
 
-    %% --- Step 1: Copywriter ---
-    ContentQ-->>Copywriter: Dequeue { step:"generate_content" }
-    Copywriter->>Trace: Log(runTraceId, "copywriter:start")
-    Copywriter->>Cosmos: Read brand/plan (as needed)
-    Copywriter->>Cosmos: Upsert contentRef + caption/hashtags
-    Copywriter->>Cosmos: Upsert agentRuns { phase:"copywriter", status:"completed" }
-    Copywriter->>MediaQ: Enqueue { runTraceId, brandId, postPlanId, step:"generate_image", refs:{ contentRef } }
-    Copywriter->>Trace: Log(runTraceId, "copywriter:enqueued_image")
+    Orchestrator->>Trace: Log(start)
+    Orchestrator->>Content: call_activity(brandId, postPlanId)
+    Content->>Cosmos: Read brand & plan
+    Content->>Cosmos: Upsert contentRef + caption
+    Content-->>Orchestrator: contentRef
 
-    %% --- Step 2: Image Composer ---
-    MediaQ-->>Composer: Dequeue { step:"generate_image", refs:{ contentRef } }
-    Composer->>Trace: Log(runTraceId, "composer-image:start")
-    Composer->>Cosmos: Read contentRef
-    Composer->>Blob: Create/store image from prompt
-    Blob-->>Composer: mediaRef (blob URL)
-    Composer->>Cosmos: Upsert mediaRef on post/run
-    Composer->>Cosmos: Upsert agentRuns { phase:"image", status:"completed" }
-    Composer->>PublishQ: Enqueue { runTraceId, brandId, postPlanId, step:"publish", refs:{ contentRef, mediaRef } }
-    Composer->>Trace: Log(runTraceId, "composer-image:enqueued_publish")
+    Orchestrator->>Image: call_activity(contentRef)
+    Image->>Cosmos: Read contentRef
+    Image->>Blob: Create/store image
+    Blob-->>Image: mediaRef
+    Image->>Cosmos: Upsert mediaRef
+    Image-->>Orchestrator: mediaRef
 
-    %% --- Step 3: Publish ---
-    PublishQ-->>Publisher: Dequeue { step:"publish", refs:{ contentRef, mediaRef } }
-    Publisher->>Trace: Log(runTraceId, "publish:start")
-    Publisher->>Cosmos: Upsert final "posts" doc (caption + mediaRef + links)
-    Publisher->>Cosmos: Upsert agentRuns { phase:"publish", status:"completed" }
-    Publisher->>Trace: Log(runTraceId, "publish:done")
+    Orchestrator->>Publish: call_activity(contentRef, mediaRef)
+    Publish->>Cosmos: Upsert final post
+    Publish-->>Orchestrator: postRef
+    Orchestrator->>Trace: Log(done)
 
-    %% --- Status polling (client-driven) ---
-    Client->>Status: GET /check_task_status?runTraceId=...
-    Status->>Cosmos: Read agentRuns + posts for runTraceId
-    Cosmos-->>Status: Progress + post doc (if available)
-    Status-->>Client: StatusResponse { phase, status, postSummary? }
+    Client->>Status: GET /check_task_status?instanceId=...
+    Status->>Orchestrator: get_status(instanceId)
+    Orchestrator-->>Status: runtime status + post
+    Status-->>Client: StatusResponse
+
