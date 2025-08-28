@@ -98,40 +98,61 @@ def q_publish_post(msg: func.QueueMessage) -> None:
     # Publish
     content_ref = (q.refs or {}).get("contentRef") if isinstance(q.refs, dict) else getattr(q.refs, "contentRef", None)
     media_ref = (q.refs or {}).get("mediaRef") if isinstance(q.refs, dict) else getattr(q.refs, "mediaRef", None)
-    result = _persist_publish(
-        run_trace_id=q.runTraceId,
-        brand_id=q.brandId,
-        post_plan_id=q.postPlanId,
-        content_ref=content_ref,
-        media_ref=media_ref,
-    )
     try:
-        RunStateStore.add_event(
-            q.runTraceId,
-            phase="publish",
-            action="published",
-            data={"postId": result.get("postId"), "contentRef": content_ref, "mediaRef": media_ref},
-        )  # type: ignore[attr-defined]
-    except Exception as exc:
-        log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="published", error=str(exc))
+        result = _persist_publish(
+            run_trace_id=q.runTraceId,
+            brand_id=q.brandId,
+            post_plan_id=q.postPlanId,
+            content_ref=content_ref,
+            media_ref=media_ref,
+        )
+        try:
+            RunStateStore.add_event(
+                q.runTraceId,
+                phase="publish",
+                action="published",
+                data={"postId": result.get("postId"), "contentRef": content_ref, "mediaRef": media_ref},
+            )  # type: ignore[attr-defined]
+        except Exception as exc:
+            log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="published", error=str(exc))
 
-    # Mark complete
-    RunStateStore.set_status(
-        q.runTraceId,
-        phase="publish",
-        status="completed",
-        summary=result,
-        brand_id=q.brandId,
-        post_plan_id=q.postPlanId,
-    )
-    duration_ms = int((perf_counter() - start) * 1000)
-    log_info(q.runTraceId, "publish:completed", postId=result.get("postId"), durationMs=duration_ms)
-    try:
-        RunStateStore.add_event(
+        # Mark complete
+        RunStateStore.set_status(
             q.runTraceId,
             phase="publish",
-            action="completed",
-            data={"postId": result.get("postId")},
-        )  # type: ignore[attr-defined]
+            status="completed",
+            summary=result,
+            brand_id=q.brandId,
+            post_plan_id=q.postPlanId,
+        )
+        duration_ms = int((perf_counter() - start) * 1000)
+        log_info(q.runTraceId, "publish:completed", postId=result.get("postId"), durationMs=duration_ms)
+        try:
+            RunStateStore.add_event(
+                q.runTraceId,
+                phase="publish",
+                action="completed",
+                data={"postId": result.get("postId")},
+            )  # type: ignore[attr-defined]
+        except Exception as exc:
+            log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="completed", error=str(exc))
     except Exception as exc:
-        log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="completed", error=str(exc))
+        log_error(q.runTraceId, "publish:error", error=str(exc))
+        try:
+            RunStateStore.add_event(
+                q.runTraceId,
+                phase="publish",
+                action="error",
+                message=str(exc),
+            )  # type: ignore[attr-defined]
+        except Exception as exc2:
+            log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="error", error=str(exc2))
+        RunStateStore.set_status(
+            q.runTraceId,
+            phase="publish",
+            status="failed",
+            summary={"error": str(exc)},
+            brand_id=q.brandId,
+            post_plan_id=q.postPlanId,
+        )
+        raise

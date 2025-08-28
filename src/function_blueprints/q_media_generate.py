@@ -120,78 +120,99 @@ def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> No
     # Generate, upload, and persist image
     content_ref = (q.refs or {}).get("contentRef") if isinstance(q.refs, dict) else getattr(q.refs, "contentRef", None)
     try:
-        result = _generate_image_via_agent(
-            run_trace_id=q.runTraceId,
-            brand_id=q.brandId,
-            post_plan_id=q.postPlanId,
-            content_ref=content_ref,
-        )
-    except Exception as exc:
-        # Fallback to direct image generation tool (which handles Azure OpenAI or placeholder)
-        tool_resp = call_image_tool(
-            "generate_image_from_prompt",
-            {
-                "brandId": q.brandId,
-                "postPlanId": q.postPlanId,
-                "runTraceId": q.runTraceId,
-                "prompt": _load_content_caption(content_ref),
-            },
-        )
-        res = (tool_resp.get("result") or {}) if isinstance(tool_resp, dict) else {}
-        result = {"mediaRef": res.get("mediaRef", ""), "url": res.get("url", ""), "provider": res.get("provider")}
+        try:
+            result = _generate_image_via_agent(
+                run_trace_id=q.runTraceId,
+                brand_id=q.brandId,
+                post_plan_id=q.postPlanId,
+                content_ref=content_ref,
+            )
+        except Exception as exc:
+            # Fallback to direct image generation tool (which handles Azure OpenAI or placeholder)
+            tool_resp = call_image_tool(
+                "generate_image_from_prompt",
+                {
+                    "brandId": q.brandId,
+                    "postPlanId": q.postPlanId,
+                    "runTraceId": q.runTraceId,
+                    "prompt": _load_content_caption(content_ref),
+                },
+            )
+            res = (tool_resp.get("result") or {}) if isinstance(tool_resp, dict) else {}
+            result = {"mediaRef": res.get("mediaRef", ""), "url": res.get("url", ""), "provider": res.get("provider")}
+            try:
+                RunStateStore.add_event(
+                    q.runTraceId,
+                    phase="image",
+                    action="fallback_generate",
+                    message=str(exc),
+                )  # type: ignore[attr-defined]
+            except Exception as exc2:
+                log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="fallback_generate", error=str(exc2))
+
         try:
             RunStateStore.add_event(
                 q.runTraceId,
                 phase="image",
-                action="fallback_generate",
+                action="agent_output",
+                data={"mediaRef": result.get("mediaRef"), "url": result.get("url")},
+            )  # type: ignore[attr-defined]
+        except Exception as exc:
+            log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="agent_output", error=str(exc))
+
+        # Mark phase complete
+        RunStateStore.set_status(
+            q.runTraceId,
+            phase="image",
+            status="completed",
+            summary=result,
+            brand_id=q.brandId,
+            post_plan_id=q.postPlanId,
+        )
+        duration_ms = int((perf_counter() - start) * 1000)
+        log_info(q.runTraceId, "image:completed", durationMs=duration_ms)
+        try:
+            RunStateStore.add_event(q.runTraceId, phase="image", action="completed")  # type: ignore[attr-defined]
+        except Exception as exc:
+            log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="completed", error=str(exc))
+
+        # Enqueue publish
+        next_msg = QueueMessage(
+            runTraceId=q.runTraceId,
+            brandId=q.brandId,
+            postPlanId=q.postPlanId,
+            step="publish",
+            agent="none",
+            refs={"contentRef": content_ref, "mediaRef": result["mediaRef"]},
+        )
+        publish_queue.set(next_msg.model_dump_json())
+        log_info(q.runTraceId, "image:enqueued_publish")
+        try:
+            RunStateStore.add_event(
+                q.runTraceId,
+                phase="image",
+                action="enqueued_next",
+                data={"next": "publish-tasks", "step": "publish", "mediaRef": result.get("mediaRef")},
+            )  # type: ignore[attr-defined]
+        except Exception as exc:
+            log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="enqueued_next", error=str(exc))
+    except Exception as exc:
+        log_error(q.runTraceId, "image:error", error=str(exc))
+        try:
+            RunStateStore.add_event(
+                q.runTraceId,
+                phase="image",
+                action="error",
                 message=str(exc),
             )  # type: ignore[attr-defined]
         except Exception as exc2:
-            log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="fallback_generate", error=str(exc2))
-
-    try:
-        RunStateStore.add_event(
+            log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="error", error=str(exc2))
+        RunStateStore.set_status(
             q.runTraceId,
             phase="image",
-            action="agent_output",
-            data={"mediaRef": result.get("mediaRef"), "url": result.get("url")},
-        )  # type: ignore[attr-defined]
-    except Exception as exc:
-        log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="agent_output", error=str(exc))
-
-    # Mark phase complete
-    RunStateStore.set_status(
-        q.runTraceId,
-        phase="image",
-        status="completed",
-        summary=result,
-        brand_id=q.brandId,
-        post_plan_id=q.postPlanId,
-    )
-    duration_ms = int((perf_counter() - start) * 1000)
-    log_info(q.runTraceId, "image:completed", durationMs=duration_ms)
-    try:
-        RunStateStore.add_event(q.runTraceId, phase="image", action="completed")  # type: ignore[attr-defined]
-    except Exception as exc:
-        log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="completed", error=str(exc))
-
-    # Enqueue publish
-    next_msg = QueueMessage(
-        runTraceId=q.runTraceId,
-        brandId=q.brandId,
-        postPlanId=q.postPlanId,
-        step="publish",
-        agent="none",
-        refs={"contentRef": content_ref, "mediaRef": result["mediaRef"]},
-    )
-    publish_queue.set(next_msg.model_dump_json())
-    log_info(q.runTraceId, "image:enqueued_publish")
-    try:
-        RunStateStore.add_event(
-            q.runTraceId,
-            phase="image",
-            action="enqueued_next",
-            data={"next": "publish-tasks", "step": "publish", "mediaRef": result.get("mediaRef")},
-        )  # type: ignore[attr-defined]
-    except Exception as exc:
-        log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="enqueued_next", error=str(exc))
+            status="failed",
+            summary={"error": str(exc)},
+            brand_id=q.brandId,
+            post_plan_id=q.postPlanId,
+        )
+        raise
