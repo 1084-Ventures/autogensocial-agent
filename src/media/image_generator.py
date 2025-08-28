@@ -1,5 +1,4 @@
 import io
-import os
 from typing import Dict, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
