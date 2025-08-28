@@ -17,6 +17,8 @@ from src.shared.logging_utils import info as log_info, error as log_error
 
 bp = func.Blueprint()
 
+PUBLISH_QUEUE = os.getenv("PUBLISH_TASKS_QUEUE", "publish-tasks")
+
 
 def _get_cosmos_container(env_name: str):
     conn = os.getenv("COSMOS_DB_CONNECTION_STRING")
@@ -70,7 +72,7 @@ def _persist_publish(
 @bp.function_name(name="q_publish_post")
 @bp.queue_trigger(
     arg_name="msg",
-    queue_name="publish-tasks",
+    queue_name="%PUBLISH_TASKS_QUEUE%",
     connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 def q_publish_post(msg: func.QueueMessage) -> None:
@@ -79,7 +81,7 @@ def q_publish_post(msg: func.QueueMessage) -> None:
     data = json.loads(body)
     q = QueueMessage(**data)
 
-    log_info(q.runTraceId, "queue:dequeued", queue="publish-tasks", messageId=getattr(msg, "id", None))
+    log_info(q.runTraceId, "queue:dequeued", queue=PUBLISH_QUEUE, messageId=getattr(msg, "id", None))
 
     # Mark phase start
     RunStateStore.set_status(

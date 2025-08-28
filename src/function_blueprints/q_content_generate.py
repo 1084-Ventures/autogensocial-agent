@@ -1,4 +1,5 @@
 import json
+import os
 from time import perf_counter
 import azure.functions as func
 
@@ -10,6 +11,9 @@ from src.agents.copywriter_agent_foundry import FoundryCopywriterAgent
 
 
 bp = func.Blueprint()
+
+CONTENT_QUEUE = os.getenv("CONTENT_TASKS_QUEUE", "content-tasks")
+MEDIA_QUEUE = os.getenv("MEDIA_TASKS_QUEUE", "media-tasks")
 
 def _generate_content_with_agent(run_trace_id: str, brand_id: str, post_plan_id: str) -> dict:
     agent = FoundryCopywriterAgent()
@@ -24,12 +28,12 @@ def _generate_content_with_agent(run_trace_id: str, brand_id: str, post_plan_id:
 @bp.function_name(name="q_content_generate")
 @bp.queue_trigger(
     arg_name="msg",
-    queue_name="content-tasks",
+    queue_name="%CONTENT_TASKS_QUEUE%",
     connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 @bp.queue_output(
     arg_name="media_queue",
-    queue_name="media-tasks",
+    queue_name="%MEDIA_TASKS_QUEUE%",
     connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 def q_content_generate(msg: func.QueueMessage, media_queue: func.Out[str]) -> None:
@@ -38,7 +42,7 @@ def q_content_generate(msg: func.QueueMessage, media_queue: func.Out[str]) -> No
     data = json.loads(body)
     q = QueueMessage(**data)
 
-    log_info(q.runTraceId, "queue:dequeued", queue="content-tasks", messageId=getattr(msg, "id", None))
+    log_info(q.runTraceId, "queue:dequeued", queue=CONTENT_QUEUE, messageId=getattr(msg, "id", None))
 
     # Mark phase start
     RunStateStore.set_status(
@@ -119,7 +123,7 @@ def q_content_generate(msg: func.QueueMessage, media_queue: func.Out[str]) -> No
             q.runTraceId,
             phase="copywriter",
             action="enqueued_next",
-            data={"next": "media-tasks", "step": "generate_image", "contentRef": result.get("contentRef")},
+            data={"next": MEDIA_QUEUE, "step": "generate_image", "contentRef": result.get("contentRef")},
         )  # type: ignore[attr-defined]
     except Exception as exc:
         log_error(q.runTraceId, "run_state:add_event_failed", phase="copywriter", action="enqueued_next", error=str(exc))

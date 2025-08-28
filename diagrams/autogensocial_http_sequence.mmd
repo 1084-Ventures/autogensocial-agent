@@ -6,15 +6,17 @@ sequenceDiagram
     participant Client as Client (HTTP)
     participant Starter as HTTP Starter (/orchestrate_content)
     participant Status as HTTP Status (/check_task_status)
-    participant ContentQ as content-tasks (Queue)
-    participant MediaQ as media-tasks (Queue)
-    participant PublishQ as publish-tasks (Queue)
+    participant ContentQ as CONTENT_TASKS_QUEUE (Queue)
+    participant MediaQ as MEDIA_TASKS_QUEUE (Queue)
+    participant PublishQ as PUBLISH_TASKS_QUEUE (Queue)
     participant Copywriter as CopywriterAgentWorker
     participant Composer as ComposerImageAgentWorker
     participant Publisher as PublishWorker
     participant Cosmos as Cosmos DB
     participant Blob as Blob Storage
     participant Trace as TraceLogger
+
+    Note over Starter,Status: Queue names are configured via app settings\nCONTENT_TASKS_QUEUE, MEDIA_TASKS_QUEUE, PUBLISH_TASKS_QUEUE
 
     %% --- Step 0: Kickoff ---
     Client->>Starter: OrchestrateContentRequest { brandId, postPlanId }

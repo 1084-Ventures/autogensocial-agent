@@ -54,8 +54,13 @@ az account set --subscription "<your-subscription-name-or-id>"
     
     # Storage
     "AZURE_STORAGE_CONNECTION_STRING": "<your-azure-storage-connection-string>",
-    # Recommended: also set AzureWebJobsStorage to the same connection string
-    "AzureWebJobsStorage": "<your-azure-storage-connection-string>",
+    # Single source of truth for Functions host as well
+    "AzureWebJobsStorage": "%AZURE_STORAGE_CONNECTION_STRING%",
+
+    # Queue names (override to customize without code changes)
+    "CONTENT_TASKS_QUEUE": "content-tasks",
+    "MEDIA_TASKS_QUEUE": "media-tasks",
+    "PUBLISH_TASKS_QUEUE": "publish-tasks",
     # Optional: Application Insights
     "APPLICATIONINSIGHTS_CONNECTION_STRING": "your-appinsights-connection-string",
     
@@ -93,8 +98,10 @@ func start
 ```
 
 Notes:
-- By default, queues use `AZURE_STORAGE_CONNECTION_STRING` (real Azure Storage). The function runtime also uses `AzureWebJobsStorage`; set it to the same connection string.
-- If you prefer Azurite instead, start it outside the repo and point `AzureWebJobsStorage` to `UseDevelopmentStorage=true`:
+- Queues bind via `AZURE_STORAGE_CONNECTION_STRING`. The Functions host also uses storage via `AzureWebJobsStorage`, which here references `%AZURE_STORAGE_CONNECTION_STRING%` to avoid duplication.
+- If you prefer Azurite locally, start it and set:
+  - `AZURE_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true`
+  - `AzureWebJobsStorage=UseDevelopmentStorage=true`
   - `azurite --location "$HOME/.azurite" --silent`
   - Avoid storing Azurite data in the repo to prevent file-watcher restarts.
 
@@ -110,10 +117,10 @@ Azure AI Foundry Agents require authentication via `DefaultAzureCredential`. Loc
 
 ### Queue Pipeline
 
-1. `content-tasks`: Content generation queue
-2. `media-tasks`: Image generation queue
-3. `publish-tasks`: Publishing queue
-4. `error-tasks`: Error handling queue
+1. `CONTENT_TASKS_QUEUE` (default: `content-tasks`): Content generation
+2. `MEDIA_TASKS_QUEUE` (default: `media-tasks`): Image generation
+3. `PUBLISH_TASKS_QUEUE` (default: `publish-tasks`): Publishing
+4. `error-tasks` (optional): Error handling
 
 ### Observability
 

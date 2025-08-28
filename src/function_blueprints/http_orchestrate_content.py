@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from time import perf_counter
@@ -16,12 +17,13 @@ from src.shared.logging_utils import info as log_info, error as log_error
 
 bp = func.Blueprint()
 
+CONTENT_QUEUE = os.getenv("CONTENT_TASKS_QUEUE", "content-tasks")
 
 @bp.function_name(name="orchestrate_content")
 @bp.route(route="orchestrate_content", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 @bp.queue_output(
     arg_name="content_queue",
-    queue_name="content-tasks",
+    queue_name="%CONTENT_TASKS_QUEUE%",
     connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> func.HttpResponse:
@@ -86,7 +88,7 @@ def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> 
             run_trace_id,
             phase="orchestrate",
             action="enqueued_next",
-            data={"next": "content-tasks", "step": "generate_content"},
+            data={"next": CONTENT_QUEUE, "step": "generate_content"},
         )  # type: ignore[attr-defined]
     except Exception as exc:
         log_error(run_trace_id, "run_state:add_event_failed", phase="orchestrate", action="enqueued_next", error=str(exc))

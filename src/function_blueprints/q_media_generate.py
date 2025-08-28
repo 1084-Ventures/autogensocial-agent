@@ -20,6 +20,9 @@ from src.tools.image_creation_tools import call_function_tool as call_image_tool
 
 bp = func.Blueprint()
 
+MEDIA_QUEUE = os.getenv("MEDIA_TASKS_QUEUE", "media-tasks")
+PUBLISH_QUEUE = os.getenv("PUBLISH_TASKS_QUEUE", "publish-tasks")
+
 
 def _get_cosmos_container(env_name: str) -> Any:
     conn = os.getenv("COSMOS_DB_CONNECTION_STRING")
@@ -87,12 +90,12 @@ def _generate_image_via_agent(
 @bp.function_name(name="q_media_generate")
 @bp.queue_trigger(
     arg_name="msg",
-    queue_name="media-tasks",
+    queue_name="%MEDIA_TASKS_QUEUE%",
     connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 @bp.queue_output(
     arg_name="publish_queue",
-    queue_name="publish-tasks",
+    queue_name="%PUBLISH_TASKS_QUEUE%",
     connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> None:
@@ -101,7 +104,7 @@ def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> No
     data = json.loads(body)
     q = QueueMessage(**data)
 
-    log_info(q.runTraceId, "queue:dequeued", queue="media-tasks", messageId=getattr(msg, "id", None))
+    log_info(q.runTraceId, "queue:dequeued", queue=MEDIA_QUEUE, messageId=getattr(msg, "id", None))
 
     # Mark phase start
     RunStateStore.set_status(
@@ -192,7 +195,7 @@ def q_media_generate(msg: func.QueueMessage, publish_queue: func.Out[str]) -> No
                 q.runTraceId,
                 phase="image",
                 action="enqueued_next",
-                data={"next": "publish-tasks", "step": "publish", "mediaRef": result.get("mediaRef")},
+                data={"next": PUBLISH_QUEUE, "step": "publish", "mediaRef": result.get("mediaRef")},
             )  # type: ignore[attr-defined]
         except Exception as exc:
             log_error(q.runTraceId, "run_state:add_event_failed", phase="image", action="enqueued_next", error=str(exc))
