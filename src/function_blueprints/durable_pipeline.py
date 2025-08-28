@@ -10,6 +10,7 @@ from src.specs.http.orchestrate_content import (
 from src.function_blueprints.q_content_generate import _generate_content_with_agent
 from src.function_blueprints.q_media_generate import _generate_image_via_agent
 from src.function_blueprints.q_publish_post import _persist_publish
+from src.specs.agents.publish import PublishInput
 
 bp = func.Blueprint()
 
@@ -89,10 +90,14 @@ def durable_generate_media(data: dict) -> dict:
 @bp.function_name(name="durable_publish_post")
 @df.activity_trigger(input_name="data")
 def durable_publish_post(data: dict) -> dict:
-    return _persist_publish(
-        run_trace_id=data["runTraceId"],
-        brand_id=data["brandId"],
-        post_plan_id=data["postPlanId"],
-        content_ref=data.get("contentRef"),
-        media_ref=data.get("mediaRef"),
+    result = _persist_publish(
+        PublishInput(
+            runTraceId=data["runTraceId"],
+            brandId=data["brandId"],
+            postPlanId=data["postPlanId"],
+            contentRef=data.get("contentRef"),
+            mediaRef=data.get("mediaRef"),
+        )
     )
+    return result.model_dump()
+

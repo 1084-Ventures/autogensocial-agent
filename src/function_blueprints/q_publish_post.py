@@ -11,6 +11,7 @@ except Exception:  # pragma: no cover
     CosmosClient = None  # type: ignore
 
 from src.specs.queue.message import QueueMessage
+from src.specs.agents.publish import PublishInput, PublishOutput
 from src.shared.state import RunStateStore
 from src.shared.logging_utils import info as log_info, error as log_error
 
@@ -31,26 +32,19 @@ def _get_cosmos_container(env_name: str):
     return db.get_container_client(container_name)
 
 
-def _persist_publish(
-    *,
-    run_trace_id: str,
-    brand_id: str,
-    post_plan_id: str,
-    content_ref: str,
-    media_ref: str,
-) -> dict:
+def _persist_publish(data: PublishInput) -> PublishOutput:
     post_id = f"post-{uuid.uuid4().hex[:12]}"
     published_at = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": post_id,
-        "partitionKey": brand_id,
+        "partitionKey": data.brandId,
         "type": "publishedPost",
-        "brandId": brand_id,
-        "postPlanId": post_plan_id,
-        "runTraceId": run_trace_id,
+        "brandId": data.brandId,
+        "postPlanId": data.postPlanId,
+        "runTraceId": data.runTraceId,
         "publishedAtUtc": published_at,
-        "contentRef": content_ref,
-        "mediaRef": media_ref,
+        "contentRef": data.contentRef,
+        "mediaRef": data.mediaRef,
         "status": "published",
     }
     container = _get_cosmos_container("COSMOS_DB_CONTAINER_POSTS")
@@ -58,15 +52,20 @@ def _persist_publish(
         try:
             container.upsert_item(doc)
             try:
-                log_info(run_trace_id, "cosmos:posts:upsert_published", postId=post_id, brandId=brand_id)
+                log_info(data.runTraceId, "cosmos:posts:upsert_published", postId=post_id, brandId=data.brandId)
             except Exception:
                 pass
         except Exception as exc:
             try:
-                log_error(run_trace_id, "cosmos:posts:upsert_failed", postId=post_id, error=str(exc))
+                log_error(data.runTraceId, "cosmos:posts:upsert_failed", postId=post_id, error=str(exc))
             except Exception:
                 pass
-    return {"postId": post_id, "publishedAtUtc": published_at, "contentRef": content_ref, "mediaRef": media_ref}
+    return PublishOutput(
+        postId=post_id,
+        publishedAtUtc=published_at,
+        contentRef=data.contentRef,
+        mediaRef=data.mediaRef,
+    )
 
 
 @bp.function_name(name="q_publish_post")
@@ -101,19 +100,20 @@ def q_publish_post(msg: func.QueueMessage) -> None:
     content_ref = (q.refs or {}).get("contentRef") if isinstance(q.refs, dict) else getattr(q.refs, "contentRef", None)
     media_ref = (q.refs or {}).get("mediaRef") if isinstance(q.refs, dict) else getattr(q.refs, "mediaRef", None)
     try:
-        result = _persist_publish(
-            run_trace_id=q.runTraceId,
-            brand_id=q.brandId,
-            post_plan_id=q.postPlanId,
-            content_ref=content_ref,
-            media_ref=media_ref,
+        pub_input = PublishInput(
+            runTraceId=q.runTraceId,
+            brandId=q.brandId,
+            postPlanId=q.postPlanId,
+            contentRef=content_ref,
+            mediaRef=media_ref,
         )
+        result = _persist_publish(pub_input)
         try:
             RunStateStore.add_event(
                 q.runTraceId,
                 phase="publish",
                 action="published",
-                data={"postId": result.get("postId"), "contentRef": content_ref, "mediaRef": media_ref},
+                data={"postId": result.postId, "contentRef": content_ref, "mediaRef": media_ref},
             )  # type: ignore[attr-defined]
         except Exception as exc:
             log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="published", error=str(exc))
@@ -123,18 +123,18 @@ def q_publish_post(msg: func.QueueMessage) -> None:
             q.runTraceId,
             phase="publish",
             status="completed",
-            summary=result,
+            summary=result.model_dump(),
             brand_id=q.brandId,
             post_plan_id=q.postPlanId,
         )
         duration_ms = int((perf_counter() - start) * 1000)
-        log_info(q.runTraceId, "publish:completed", postId=result.get("postId"), durationMs=duration_ms)
+        log_info(q.runTraceId, "publish:completed", postId=result.postId, durationMs=duration_ms)
         try:
             RunStateStore.add_event(
                 q.runTraceId,
                 phase="publish",
                 action="completed",
-                data={"postId": result.get("postId")},
+                data={"postId": result.postId},
             )  # type: ignore[attr-defined]
         except Exception as exc:
             log_error(q.runTraceId, "run_state:add_event_failed", phase="publish", action="completed", error=str(exc))
@@ -158,3 +158,4 @@ def q_publish_post(msg: func.QueueMessage) -> None:
             post_plan_id=q.postPlanId,
         )
         raise
+
