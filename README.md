@@ -113,7 +113,7 @@ Azure AI Foundry Agents require authentication via `DefaultAzureCredential`. Loc
 
 ### Durable Pipeline
 
-The app uses a single durable orchestrator (`orchestrate_content`) to coordinate the workflow. Best practices applied to the orchestration include:
+The app uses a single durable orchestrator (`durable_orchestrator`) started via `POST /durable_orchestrate` to coordinate the workflow. Best practices applied to the orchestration include:
 
 - The HTTP starter triggers the orchestrator and returns the durable `instanceId` so clients can poll for progress.
 - The orchestrator remains deterministic and performs no direct I/O; all side effects are delegated to activity functions.
