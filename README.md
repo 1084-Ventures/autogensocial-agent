@@ -113,11 +113,20 @@ Azure AI Foundry Agents require authentication via `DefaultAzureCredential`. Loc
 
 ### Durable Pipeline
 
-The function app uses Azure Durable Functions to orchestrate the full content workflow. The orchestrator executes three sequential activities:
+The app uses a single durable orchestrator (`orchestrate_content`) to coordinate the workflow. Best practices applied to the orchestration include:
 
-1. Generate post content
-2. Create accompanying media
-3. Persist the published post
+- The HTTP starter triggers the orchestrator and returns the durable `instanceId` so clients can poll for progress.
+- The orchestrator remains deterministic and performs no direct I/O; all side effects are delegated to activity functions.
+- Activity functions are idempotent and accept only the identifiers they need (brand, plan, content, media, etc.).
+- Durable Functions automatically checkpoints state after each activity, allowing the workflow to resume if the host restarts.
+
+The orchestrator calls three activities in sequence:
+
+1. `generate_content` – produce caption and hashtags and persist a `contentRef`.
+2. `generate_image` – create media for the content and save a `mediaRef`.
+3. `publish_post` – persist the final post document.
+
+Clients query `/check_task_status` with the returned `instanceId` to monitor the workflow.
 
 ### Observability
 
