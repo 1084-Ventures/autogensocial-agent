@@ -8,8 +8,8 @@ from src.specs.http.orchestrate_content import (
     ErrorResponse,
 )
 from src.function_blueprints.agent_tasks import (
-    generate_content_with_agent,
-    generate_image_via_agent,
+    generate_content_with_foundry_agent,
+    generate_image_with_foundry_agent,
     persist_publish,
     load_post_plan,
     post_to_channel,
@@ -92,7 +92,7 @@ def durable_orchestrator(context: df.DurableOrchestrationContext):
 @bp.function_name(name="durable_generate_content")
 @df.activity_trigger(input_name="data")
 def durable_generate_content(data: dict) -> dict:
-    return generate_content_with_agent(
+    return generate_content_with_foundry_agent(
         data["runTraceId"], data["brandId"], data["postPlanId"]
     )
 
@@ -100,7 +100,7 @@ def durable_generate_content(data: dict) -> dict:
 @bp.function_name(name="durable_generate_media")
 @df.activity_trigger(input_name="data")
 def durable_generate_media(data: dict) -> dict:
-    return generate_image_via_agent(
+    return generate_image_with_foundry_agent(
         run_trace_id=data["runTraceId"],
         brand_id=data["brandId"],
         post_plan_id=data["postPlanId"],

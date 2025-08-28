@@ -12,7 +12,9 @@ from src.shared.logging_utils import info as log_info, error as log_error
 from src.tools.get_post_plan_tool import get_post_plan
 
 
-def generate_content_with_agent(run_trace_id: str, brand_id: str, post_plan_id: str) -> dict:
+def generate_content_with_foundry_agent(
+    run_trace_id: str, brand_id: str, post_plan_id: str
+) -> dict:
     agent = FoundryCopywriterAgent()
     out = agent.run(
         CopywriterInput(
@@ -65,7 +67,7 @@ def _load_content_caption(content_ref: Optional[str]) -> str:
         return ""
 
 
-def generate_image_via_agent(
+def generate_image_with_foundry_agent(
     *,
     run_trace_id: str,
     brand_id: str,
