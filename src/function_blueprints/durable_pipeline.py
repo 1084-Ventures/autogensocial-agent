@@ -7,9 +7,11 @@ from src.specs.http.orchestrate_content import (
     OrchestrateContentResponse,
     ErrorResponse,
 )
-from src.function_blueprints.q_content_generate import _generate_content_with_agent
-from src.function_blueprints.q_media_generate import _generate_image_via_agent
-from src.function_blueprints.q_publish_post import _persist_publish
+from src.function_blueprints.agent_tasks import (
+    generate_content_with_agent,
+    generate_image_via_agent,
+    persist_publish,
+)
 from src.specs.agents.publish import PublishInput
 
 bp = func.Blueprint()
@@ -71,7 +73,7 @@ def durable_orchestrator(context: df.DurableOrchestrationContext):
 @bp.function_name(name="durable_generate_content")
 @df.activity_trigger(input_name="data")
 def durable_generate_content(data: dict) -> dict:
-    return _generate_content_with_agent(
+    return generate_content_with_agent(
         data["runTraceId"], data["brandId"], data["postPlanId"]
     )
 
@@ -79,7 +81,7 @@ def durable_generate_content(data: dict) -> dict:
 @bp.function_name(name="durable_generate_media")
 @df.activity_trigger(input_name="data")
 def durable_generate_media(data: dict) -> dict:
-    return _generate_image_via_agent(
+    return generate_image_via_agent(
         run_trace_id=data["runTraceId"],
         brand_id=data["brandId"],
         post_plan_id=data["postPlanId"],
@@ -90,7 +92,7 @@ def durable_generate_media(data: dict) -> dict:
 @bp.function_name(name="durable_publish_post")
 @df.activity_trigger(input_name="data")
 def durable_publish_post(data: dict) -> dict:
-    result = _persist_publish(
+    result = persist_publish(
         PublishInput(
             runTraceId=data["runTraceId"],
             brandId=data["brandId"],

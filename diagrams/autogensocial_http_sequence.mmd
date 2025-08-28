@@ -4,7 +4,7 @@ id: 16629962-bb60-4718-ad83-7da6c0705c9e
 
 sequenceDiagram
     participant Client as Client (HTTP)
-    participant Starter as HTTP Starter (/orchestrate_content)
+    participant Starter as HTTP Starter (/durable_orchestrate)
     participant Orchestrator as Durable Orchestrator
     participant Content as generate_content activity
     participant Image as generate_image activity
@@ -16,7 +16,7 @@ sequenceDiagram
 
     Note over Starter,Status: Client receives `instanceId` and polls status endpoint
 
-    Client->>Starter: POST { brandId, postPlanId }
+    Client->>Starter: POST /durable_orchestrate { brandId, postPlanId }
     Starter->>Orchestrator: start_new(instanceId)
     Starter-->>Client: 202 Accepted { instanceId }
 
