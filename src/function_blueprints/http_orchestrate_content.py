@@ -10,6 +10,7 @@ from src.specs.http.orchestrate_content import (
 )
 from src.specs.queue.message import QueueMessage
 from src.shared.state import RunStateStore
+from src.shared.logging_utils import info as log_info
 
 
 bp = func.Blueprint()
@@ -20,7 +21,7 @@ bp = func.Blueprint()
 @bp.queue_output(
     arg_name="content_queue",
     queue_name="content-tasks",
-    connection="AzureWebJobsStorage",
+    connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> func.HttpResponse:
     try:
@@ -51,7 +52,14 @@ def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> 
         phase="orchestrate",
         status="in_progress",
         summary={"brandId": parsed.brandId, "postPlanId": parsed.postPlanId},
+        brand_id=parsed.brandId,
+        post_plan_id=parsed.postPlanId,
     )
+    log_info(run_trace_id, "orchestrate:accepted", brandId=parsed.brandId, postPlanId=parsed.postPlanId)
+    try:
+        RunStateStore.add_event(run_trace_id, phase="orchestrate", action="accepted", data={"brandId": parsed.brandId, "postPlanId": parsed.postPlanId})  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
     # Enqueue first step: generate_content
     qmsg = QueueMessage(
@@ -62,6 +70,11 @@ def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> 
         agent="copywriter",
     )
     content_queue.set(qmsg.model_dump_json())
+    log_info(run_trace_id, "orchestrate:enqueued_content")
+    try:
+        RunStateStore.add_event(run_trace_id, phase="orchestrate", action="enqueued_next", data={"next": "content-tasks", "step": "generate_content"})  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
     resp = OrchestrateContentResponse(accepted=True, runTraceId=run_trace_id)
     return func.HttpResponse(
@@ -69,4 +82,3 @@ def orchestrate_content(req: func.HttpRequest, content_queue: func.Out[str]) -> 
         mimetype="application/json",
         status_code=202,
     )
-

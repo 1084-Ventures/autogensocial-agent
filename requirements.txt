@@ -19,3 +19,10 @@ azure-core>=1.30.0,<2.0.0
 
 # For Azure Storage Queue
 azure-storage-queue>=12.8.0,<13.0.0
+
+# Azure AI Foundry Agents SDK (default agent backend)
+azure-ai-projects>=1.0.0
+azure-ai-agents>=1.1.0
+
+# For Blob uploads (public media storage)
+azure-storage-blob>=12.19.0,<13.0.0

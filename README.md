@@ -4,7 +4,7 @@ A serverless Azure Functions app for automated social media content generation a
 
 ## Features
 
-- Content Generation: Create engaging social media posts using Azure AI Foundry agents
+- Content Generation: Create engaging social media posts using Azure AI Foundry Agents SDK
 - Media Generation: Generate and process images for social media posts
 - Content Publishing: Queue and manage post publishing
 - Queue-based Orchestration: Reliable task processing with retries and error handling
@@ -38,15 +38,30 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Create `local.settings.json`:
+4. Login to Azure for local development (for DefaultAzureCredential):
+```bash
+az login
+# If you have multiple tenants/subscriptions:
+az account set --subscription "<your-subscription-name-or-id>"
+```
+
+5. Create `local.settings.json` (don’t commit secrets):
 ```json
 {
   "IsEncrypted": false,
   "Values": {
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     
-    # Azure AI Foundry Configuration
+    # Storage
+    "AZURE_STORAGE_CONNECTION_STRING": "<your-azure-storage-connection-string>",
+    # Recommended: also set AzureWebJobsStorage to the same connection string
+    "AzureWebJobsStorage": "<your-azure-storage-connection-string>",
+    # Optional: Application Insights
+    "APPLICATIONINSIGHTS_CONNECTION_STRING": "your-appinsights-connection-string",
+    
+    # Azure AI Foundry Agents (default agent backend)
+    # PROJECT_ENDPOINT: From Azure AI Foundry Project (copy the endpoint)
+    # MODEL_DEPLOYMENT_NAME: The model deployment configured in your project
     "PROJECT_ENDPOINT": "your-foundry-project-endpoint",
     "MODEL_DEPLOYMENT_NAME": "your-model-deployment",
     
@@ -60,6 +75,9 @@ pip install -r requirements.txt
     "COSMOS_DB_CONTAINER_POSTS": "posts",
     "COSMOS_DB_CONTAINER_AGENT_RUNS": "agentRuns",
     
+    # Runtime state backend: file (default) or cosmos
+    "RUN_STATE_BACKEND": "file",
+    
     # Optional: Azure AI Search (if using database media search)
     "AZURE_AISEARCH_ENDPOINT": "your-search-endpoint",
     "AZURE_AISEARCH_KEY": "your-search-key"
@@ -69,21 +87,24 @@ pip install -r requirements.txt
 
 ### Running Locally
 
-1. Start Azurite for local storage emulation:
-```bash
-azurite
-```
-
-2. Start the function app:
+1. Start the function app:
 ```bash
 func start
 ```
+
+Notes:
+- By default, queues use `AZURE_STORAGE_CONNECTION_STRING` (real Azure Storage). The function runtime also uses `AzureWebJobsStorage`; set it to the same connection string.
+- If you prefer Azurite instead, start it outside the repo and point `AzureWebJobsStorage` to `UseDevelopmentStorage=true`:
+  - `azurite --location "$HOME/.azurite" --silent`
+  - Avoid storing Azurite data in the repo to prevent file-watcher restarts.
+
+Azure AI Foundry Agents require authentication via `DefaultAzureCredential`. Locally this typically uses your Azure CLI or VS Code login. Ensure `az login` is completed before starting the Functions host.
 
 ## Architecture
 
 ### Components
 
-- **Agent**: CopywriterAgent - Manages AI Foundry agent interactions and tool registration
+- **Agent**: FoundryCopywriterAgent - Manages Azure AI Foundry Agent interactions and tool registration
 - **Functions**: HTTP endpoints and queue triggers for orchestration
 - **Tools**: Core business logic implementations with standardized interfaces
 
@@ -99,6 +120,18 @@ func start
 - Application Insights logging
 - Cosmos DB trace storage (agentRuns container)
 - Queue message tracking
+
+#### Logging
+
+- Logs include `runTraceId` as custom dimensions when supported. To send logs to Application Insights, set `APPLICATIONINSIGHTS_CONNECTION_STRING`. Query examples:
+  - `traces | where customDimensions.runTraceId == '<id>'`
+
+#### Run State Storage
+
+- The app supports two backends for run state:
+  - `file` (default for local dev): writes JSON under the OS temp directory.
+  - `cosmos`: upserts one document per run into the `agentRuns` container using `runTraceId` as the partition key.
+- Select via `RUN_STATE_BACKEND=file|cosmos` or leave unset to auto-detect Cosmos when its env vars are present.
 
 ## Development Guidelines
 
@@ -127,9 +160,27 @@ func start
    ```
 
 3. **Error Handling**:
-   - Use proper exception types
-   - Log with context
-   - Queue error tasks for retry/notification
+  - Use proper exception types
+  - Log with context
+  - Queue error tasks for retry/notification
+
+## Agents
+
+- Default agent implementation uses Azure AI Foundry Agents SDK and function tools for data access:
+  - `src/agents/copywriter_agent_foundry.py`
+  - Tools are defined per-module and registered as function tools:
+    - `src/tools/get_brand_tool.py`
+    - `src/tools/get_post_plan_tool.py`
+
+### Required environment for agents
+
+- `PROJECT_ENDPOINT`: AI Foundry project endpoint
+- `MODEL_DEPLOYMENT_NAME`: Model deployment within the project
+- Azure login for `DefaultAzureCredential` (e.g., `az login` locally)
+
+### Optional persistence
+
+- If `COSMOS_DB_CONNECTION_STRING`, `COSMOS_DB_NAME`, and `COSMOS_DB_CONTAINER_POSTS` are set, generated captions are stored as draft content and referenced by `contentRef`.
 
 ## Contributing
 

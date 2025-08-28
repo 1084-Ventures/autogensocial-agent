@@ -4,6 +4,7 @@ from typing import List, Optional, Dict
 class CopywriterInput(BaseModel):
     brandId: str
     postPlanId: str
+    runTraceId: Optional[str] = None
 
 class CopywriterOutput(BaseModel):
     contentRef: str         # where the caption/variants are stored

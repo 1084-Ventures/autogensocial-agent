@@ -5,7 +5,15 @@
       "samplingSettings": {
         "isEnabled": true,
         "excludedTypes": "Request"
+      },
+      "httpAutoCollectionOptions": {
+        "enableHttpTriggerExtendedInfoCollection": true
       }
+    },
+    "logLevel": {
+      "default": "Information",
+      "Host.Results": "Information",
+      "Function": "Information"
     }
   },
   "extensionBundle": {
