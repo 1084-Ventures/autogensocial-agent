@@ -11,6 +11,8 @@ from src.function_blueprints.agent_tasks import (
     generate_content_with_agent,
     generate_image_via_agent,
     persist_publish,
+    load_post_plan,
+    post_to_channel,
 )
 from src.specs.agents.publish import PublishInput
 
@@ -62,11 +64,28 @@ async def durable_http_start(
 @df.orchestration_trigger(context_name="context")
 def durable_orchestrator(context: df.DurableOrchestrationContext):
     data = context.get_input() or {}
+    plan = yield context.call_activity("durable_load_post_plan", data)
     content = yield context.call_activity("durable_generate_content", data)
-    media_input = {**data, **content}
-    media = yield context.call_activity("durable_generate_media", media_input)
+
+    media = {}
+    media_plan = (plan or {}).get("media") or {}
+    requires_media = media_plan.get("type") not in (None, "text-only")
+    if requires_media:
+        media_input = {**data, **content}
+        media = yield context.call_activity("durable_generate_media", media_input)
+
     publish_input = {**data, **content, **media}
-    result = yield context.call_activity("durable_publish_post", publish_input)
+
+    channels = (plan or {}).get("channels") or []
+    if channels:
+        tasks = []
+        for ch in channels:
+            ch_input = {**publish_input, "channel": ch}
+            tasks.append(context.call_activity("durable_post_to_channel", ch_input))
+        if tasks:
+            yield context.task_all(tasks)
+
+    result = yield context.call_activity("durable_persist_post", publish_input)
     return result
 
 
@@ -89,9 +108,28 @@ def durable_generate_media(data: dict) -> dict:
     )
 
 
-@bp.function_name(name="durable_publish_post")
+@bp.function_name(name="durable_load_post_plan")
 @df.activity_trigger(input_name="data")
-def durable_publish_post(data: dict) -> dict:
+def durable_load_post_plan(data: dict) -> dict:
+    return load_post_plan(brand_id=data["brandId"], post_plan_id=data["postPlanId"])
+
+
+@bp.function_name(name="durable_post_to_channel")
+@df.activity_trigger(input_name="data")
+def durable_post_to_channel(data: dict) -> dict:
+    publish = PublishInput(
+        runTraceId=data["runTraceId"],
+        brandId=data["brandId"],
+        postPlanId=data["postPlanId"],
+        contentRef=data.get("contentRef"),
+        mediaRef=data.get("mediaRef"),
+    )
+    return post_to_channel(data["channel"], publish)
+
+
+@bp.function_name(name="durable_persist_post")
+@df.activity_trigger(input_name="data")
+def durable_persist_post(data: dict) -> dict:
     result = persist_publish(
         PublishInput(
             runTraceId=data["runTraceId"],
