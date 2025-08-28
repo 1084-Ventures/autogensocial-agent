@@ -6,25 +6,25 @@ sequenceDiagram
     participant Client as Client (HTTP)
     participant Starter as HTTP Starter (/durable_orchestrate)
     participant Orchestrator as Durable Orchestrator
-    participant Content as generate_content activity
-    participant Image as generate_image activity
+    participant Copywriter as Copywriter Agent (Azure Foundry)
+    participant ImageAgent as Image Agent (Azure Foundry)
     participant Publish as publish_post activity
     participant Status as HTTP Status (/check_task_status)
     participant Cosmos as Cosmos DB
     participant Blob as Blob Storage
     participant Trace as TraceLogger
 
-    Note over Starter,Status: Client receives `instanceId` and polls status endpoint
+    Orchestrator->>Copywriter: call_activity(brandId, postPlanId)
+    Copywriter->>Cosmos: Read brand & plan
+    Copywriter->>Cosmos: Upsert contentRef + caption
+    Copywriter-->>Orchestrator: contentRef
 
-    Client->>Starter: POST /durable_orchestrate { brandId, postPlanId }
-    Starter->>Orchestrator: start_new(instanceId)
-    Starter-->>Client: 202 Accepted { instanceId }
-
-    Orchestrator->>Trace: Log(start)
-    Orchestrator->>Content: call_activity(brandId, postPlanId)
-    Content->>Cosmos: Read brand & plan
-    Content->>Cosmos: Upsert contentRef + caption
-    Content-->>Orchestrator: contentRef
+    Orchestrator->>ImageAgent: call_activity(contentRef)
+    ImageAgent->>Cosmos: Read contentRef
+    ImageAgent->>Blob: Create/store image
+    Blob-->>ImageAgent: mediaRef
+    ImageAgent->>Cosmos: Upsert mediaRef
+    ImageAgent-->>Orchestrator: mediaRef
 
     Orchestrator->>Image: call_activity(contentRef)
     Image->>Cosmos: Read contentRef
