@@ -21,6 +21,7 @@ from src.shared.state import RunStateStore
 from src.tools.get_brand_tool import FUNCTION_TOOL as BRAND_TOOL, call_function_tool as call_brand
 from src.tools.get_post_plan_tool import FUNCTION_TOOL as PLAN_TOOL, call_function_tool as call_plan
 from src.shared.logging_utils import info as log_info
+from src.shared.retry_utils import retry_with_backoff
 
 
 class FoundryCopywriterAgent:
@@ -87,15 +88,22 @@ class FoundryCopywriterAgent:
         }
         try:
             container.upsert_item(body)
-            try:
-                log_info(getattr(self, "_run_trace_id", None), "cosmos:posts:upsert_content", docId=doc_id, brandId=brand_id, postPlanId=post_plan_id, captionLen=len(caption), hashtags=len(hashtags))
-            except Exception:
-                pass
+            log_info(
+                getattr(self, "_run_trace_id", None),
+                "cosmos:posts:upsert_content",
+                docId=doc_id,
+                brandId=brand_id,
+                postPlanId=post_plan_id,
+                captionLen=len(caption),
+                hashtags=len(hashtags),
+            )
         except Exception as exc:
-            try:
-                log_info(getattr(self, "_run_trace_id", None), "cosmos:posts:upsert_failed", docId=doc_id, error=str(exc))
-            except Exception:
-                pass
+            log_info(
+                getattr(self, "_run_trace_id", None),
+                "cosmos:posts:upsert_failed",
+                docId=doc_id,
+                error=str(exc),
+            )
         return doc_id
 
     @staticmethod
@@ -124,34 +132,21 @@ class FoundryCopywriterAgent:
         return ""
 
     def _submit_tool_outputs_with_retry(self, *, thread_id: str, run_id: str, outputs: List[Dict[str, Any]]):
-        delay = 1.5
-        for attempt in range(4):
-            try:
-                return self._client.agents.runs.submit_tool_outputs(
-                    thread_id=thread_id,
-                    run_id=run_id,
-                    tool_outputs=outputs,
-                )
-            except Exception:
-                if attempt == 3:
-                    raise
-                time.sleep(delay)
-                delay *= 1.5
+        return retry_with_backoff(
+            lambda: self._client.agents.runs.submit_tool_outputs(
+                thread_id=thread_id,
+                run_id=run_id,
+                tool_outputs=outputs,
+            ),
+            attempts=4,
+        )
 
     def _process_run(self, *, thread_id: str, agent_id: str) -> Dict[str, Any]:
         # Create run with simple backoff in case of transient disconnects
-        delay = 1.5
-        last_exc: Optional[Exception] = None
-        for attempt in range(3):
-            try:
-                run = self._client.agents.runs.create(thread_id=thread_id, agent_id=agent_id)
-                break
-            except Exception as exc:
-                last_exc = exc
-                if attempt == 2:
-                    raise
-                time.sleep(delay)
-                delay *= 1.5
+        run = retry_with_backoff(
+            lambda: self._client.agents.runs.create(thread_id=thread_id, agent_id=agent_id),
+            attempts=3,
+        )
         # Poll the run, tolerating occasional GET failures
         backoff = 0.75
         while True:

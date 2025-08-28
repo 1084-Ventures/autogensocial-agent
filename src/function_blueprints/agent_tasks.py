@@ -1,30 +1,14 @@
-import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
-
-try:
-    from azure.cosmos import CosmosClient  # type: ignore
-except Exception:  # pragma: no cover
-    CosmosClient = None  # type: ignore
+from typing import Optional
 
 from src.agents.copywriter_agent_foundry import FoundryCopywriterAgent
 from src.agents.image_agent_foundry import FoundryImageAgent
 from src.specs.agents.copywriter import CopywriterInput
 from src.specs.agents.image import ImageAgentInput
 from src.specs.agents.publish import PublishInput, PublishOutput
+from src.shared.cosmos_utils import get_cosmos_container
 from src.shared.logging_utils import info as log_info, error as log_error
-
-
-def _get_cosmos_container(env_name: str) -> Any:
-    conn = os.getenv("COSMOS_DB_CONNECTION_STRING")
-    db_name = os.getenv("COSMOS_DB_NAME")
-    container_name = os.getenv(env_name)
-    if not conn or not db_name or not container_name or CosmosClient is None:
-        return None
-    client = CosmosClient.from_connection_string(conn)
-    db = client.get_database_client(db_name)
-    return db.get_container_client(container_name)
 
 
 def generate_content_with_agent(run_trace_id: str, brand_id: str, post_plan_id: str) -> dict:
@@ -44,7 +28,7 @@ def generate_content_with_agent(run_trace_id: str, brand_id: str, post_plan_id: 
 def _load_content_caption(content_ref: Optional[str]) -> str:
     if not content_ref:
         return ""
-    container = _get_cosmos_container("COSMOS_DB_CONTAINER_POSTS")
+    container = get_cosmos_container("COSMOS_DB_CONTAINER_POSTS")
     if container is None:
         return ""
     try:
@@ -57,35 +41,26 @@ def _load_content_caption(content_ref: Optional[str]) -> str:
             )
         )
         if not items:
-            try:
-                log_info(None, "cosmos:posts:query_miss", contentRef=content_ref)
-            except Exception:
-                pass
+            log_info(None, "cosmos:posts:query_miss", contentRef=content_ref)
             return ""
         first = items[0]
         doc = first.get("c") if isinstance(first, dict) and "c" in first else first
         content = (doc or {}).get("content") or {}
         caption = content.get("caption")
-        try:
-            log_info(
-                None,
-                "cosmos:posts:query_hit",
-                contentRef=content_ref,
-                captionLen=len(caption or ""),
-            )
-        except Exception:
-            pass
+        log_info(
+            None,
+            "cosmos:posts:query_hit",
+            contentRef=content_ref,
+            captionLen=len(caption or ""),
+        )
         return caption or ""
     except Exception as exc:
-        try:
-            log_info(
-                None,
-                "cosmos:posts:query_failed",
-                contentRef=content_ref,
-                error=str(exc),
-            )
-        except Exception:
-            pass
+        log_info(
+            None,
+            "cosmos:posts:query_failed",
+            contentRef=content_ref,
+            error=str(exc),
+        )
         return ""
 
 
@@ -128,29 +103,23 @@ def persist_publish(data: PublishInput) -> PublishOutput:
         "mediaRef": data.mediaRef,
         "status": "published",
     }
-    container = _get_cosmos_container("COSMOS_DB_CONTAINER_POSTS")
+    container = get_cosmos_container("COSMOS_DB_CONTAINER_POSTS")
     if container is not None:
         try:
             container.upsert_item(doc)
-            try:
-                log_info(
-                    data.runTraceId,
-                    "cosmos:posts:upsert_published",
-                    postId=post_id,
-                    brandId=data.brandId,
-                )
-            except Exception:
-                pass
+            log_info(
+                data.runTraceId,
+                "cosmos:posts:upsert_published",
+                postId=post_id,
+                brandId=data.brandId,
+            )
         except Exception as exc:
-            try:
-                log_error(
-                    data.runTraceId,
-                    "cosmos:posts:upsert_failed",
-                    postId=post_id,
-                    error=str(exc),
-                )
-            except Exception:
-                pass
+            log_error(
+                data.runTraceId,
+                "cosmos:posts:upsert_failed",
+                postId=post_id,
+                error=str(exc),
+            )
     return PublishOutput(
         postId=post_id,
         publishedAtUtc=published_at,

@@ -16,6 +16,7 @@ from src.tools.get_brand_tool import FUNCTION_TOOL as BRAND_TOOL, call_function_
 from src.tools.get_post_plan_tool import FUNCTION_TOOL as PLAN_TOOL, call_function_tool as call_plan
 from src.tools.search_images_tool import FUNCTION_TOOL as SEARCH_TOOL, call_function_tool as call_search
 from src.tools.image_creation_tools import FUNCTION_TOOLS as IMG_TOOLS, call_function_tool as call_img_tool
+from src.shared.retry_utils import retry_with_backoff
 
 
 class FoundryImageAgent:
@@ -80,33 +81,21 @@ class FoundryImageAgent:
         return ""
 
     def _submit_tool_outputs_with_retry(self, *, thread_id: str, run_id: str, outputs: List[Dict[str, Any]]):
-        delay = 1.5
-        for attempt in range(4):
-            try:
-                return self._client.agents.runs.submit_tool_outputs(
-                    thread_id=thread_id,
-                    run_id=run_id,
-                    tool_outputs=outputs,
-                )
-            except Exception as exc:
-                if attempt == 3:
-                    raise
-                # Transient network error; backoff and retry
-                time.sleep(delay)
-                delay *= 1.5
+        return retry_with_backoff(
+            lambda: self._client.agents.runs.submit_tool_outputs(
+                thread_id=thread_id,
+                run_id=run_id,
+                tool_outputs=outputs,
+            ),
+            attempts=4,
+        )
 
     def _process_run(self, *, thread_id: str, agent_id: str) -> Dict[str, Any]:
         # Create run with retry
-        delay = 1.5
-        for attempt in range(3):
-            try:
-                run = self._client.agents.runs.create(thread_id=thread_id, agent_id=agent_id)
-                break
-            except Exception:
-                if attempt == 2:
-                    raise
-                time.sleep(delay)
-                delay *= 1.5
+        run = retry_with_backoff(
+            lambda: self._client.agents.runs.create(thread_id=thread_id, agent_id=agent_id),
+            attempts=3,
+        )
         # Poll with tolerance for transient GET errors
         backoff = 0.75
         while True:

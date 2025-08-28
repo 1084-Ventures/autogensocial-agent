@@ -9,27 +9,12 @@ from src.media.image_generator import generate_placeholder_image
 from src.shared.blob_store import upload_bytes
 from src.specs.common.envelope import ToolResult
 from src.shared.logging_utils import info as log_info
-
-try:
-    from azure.cosmos import CosmosClient  # type: ignore
-except Exception:  # pragma: no cover
-    CosmosClient = None  # type: ignore
-
-
-def _get_cosmos_container(env_name: str):
-    conn = os.getenv("COSMOS_DB_CONNECTION_STRING")
-    db_name = os.getenv("COSMOS_DB_NAME")
-    container_name = os.getenv(env_name)
-    if not conn or not db_name or not container_name or CosmosClient is None:
-        return None
-    client = CosmosClient.from_connection_string(conn)
-    db = client.get_database_client(db_name)
-    return db.get_container_client(container_name)
+from src.shared.cosmos_utils import get_cosmos_container
 
 
 def _persist_media(*, brand_id: str, post_plan_id: str, run_trace_id: str, url: str, provider: str, meta: Dict[str, Any]) -> Dict[str, Any]:
     media_id = f"media-{uuid.uuid4().hex}"
-    container_client = _get_cosmos_container("COSMOS_DB_CONTAINER_MEDIA")
+    container_client = get_cosmos_container("COSMOS_DB_CONTAINER_MEDIA")
     if container_client is not None:
         doc = {
             "id": media_id,
@@ -47,15 +32,21 @@ def _persist_media(*, brand_id: str, post_plan_id: str, run_trace_id: str, url: 
         }
         try:
             container_client.upsert_item(doc)
-            try:
-                log_info(run_trace_id, "cosmos:media:upsert", mediaId=media_id, brandId=brand_id, postPlanId=post_plan_id, provider=provider)
-            except Exception:
-                pass
+            log_info(
+                run_trace_id,
+                "cosmos:media:upsert",
+                mediaId=media_id,
+                brandId=brand_id,
+                postPlanId=post_plan_id,
+                provider=provider,
+            )
         except Exception as exc:
-            try:
-                log_info(run_trace_id, "cosmos:media:upsert_failed", mediaId=media_id, error=str(exc))
-            except Exception:
-                pass
+            log_info(
+                run_trace_id,
+                "cosmos:media:upsert_failed",
+                mediaId=media_id,
+                error=str(exc),
+            )
     return {"mediaRef": media_id, "url": url, "provider": provider}
 
 

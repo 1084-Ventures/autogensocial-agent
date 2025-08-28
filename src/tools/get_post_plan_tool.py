@@ -39,22 +39,22 @@ def _read_post_plan_doc(container: Any, brand_id: str, post_plan_id: str) -> Opt
     try:
         item = container.read_item(item=post_plan_id, partition_key=brand_id)
         doc = dict(item)
-        try:
-            log_info(
-                None,
-                "cosmos:get_post_plan:read_item",
-                brandId=brand_id,
-                docId=str(doc.get("id")),
-                type=str(doc.get("type")),
-            )
-        except Exception:
-            pass
+        log_info(
+            None,
+            "cosmos:get_post_plan:read_item",
+            brandId=brand_id,
+            docId=str(doc.get("id")),
+            type=str(doc.get("type")),
+        )
         return doc
     except Exception as exc:
-        try:
-            log_info(None, "cosmos:get_post_plan:read_item_failed", brandId=brand_id, postPlanId=post_plan_id, error=str(exc))
-        except Exception:
-            pass
+        log_info(
+            None,
+            "cosmos:get_post_plan:read_item_failed",
+            brandId=brand_id,
+            postPlanId=post_plan_id,
+            error=str(exc),
+        )
 
     # Fallback: cross-partition query by id + brandId
     try:
@@ -74,23 +74,23 @@ def _read_post_plan_doc(container: Any, brand_id: str, post_plan_id: str) -> Opt
         if items:
             first = items[0]
             doc = dict(first["c"]) if isinstance(first, dict) and len(first) == 1 and "c" in first else dict(first)
-            try:
-                log_info(
-                    None,
-                    "cosmos:get_post_plan:query_hit",
-                    brandId=brand_id,
-                    postPlanId=post_plan_id,
-                    docId=str(doc.get("id")),
-                    type=str(doc.get("type")),
-                )
-            except Exception:
-                pass
+            log_info(
+                None,
+                "cosmos:get_post_plan:query_hit",
+                brandId=brand_id,
+                postPlanId=post_plan_id,
+                docId=str(doc.get("id")),
+                type=str(doc.get("type")),
+            )
             return doc
     except Exception as exc:
-        try:
-            log_info(None, "cosmos:get_post_plan:query_failed", brandId=brand_id, postPlanId=post_plan_id, error=str(exc))
-        except Exception:
-            pass
+        log_info(
+            None,
+            "cosmos:get_post_plan:query_failed",
+            brandId=brand_id,
+            postPlanId=post_plan_id,
+            error=str(exc),
+        )
 
     return None
 
