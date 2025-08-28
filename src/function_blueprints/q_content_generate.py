@@ -55,7 +55,28 @@ def q_content_generate(msg: func.QueueMessage, media_queue: func.Out[str]) -> No
         log_error(q.runTraceId, "run_state:add_event_failed", phase="copywriter", action="start", error=str(exc))
 
     # Generate content via Foundry agent
-    result = _generate_content_with_agent(q.runTraceId, q.brandId, q.postPlanId)
+    try:
+        result = _generate_content_with_agent(q.runTraceId, q.brandId, q.postPlanId)
+    except Exception as exc:
+        log_error(q.runTraceId, "copywriter:error", error=str(exc))
+        try:
+            RunStateStore.add_event(
+                q.runTraceId,
+                phase="copywriter",
+                action="error",
+                message=str(exc),
+            )  # type: ignore[attr-defined]
+        except Exception as exc2:
+            log_error(q.runTraceId, "run_state:add_event_failed", phase="copywriter", action="error", error=str(exc2))
+        RunStateStore.set_status(
+            q.runTraceId,
+            phase="copywriter",
+            status="failed",
+            summary={"error": str(exc)},
+            brand_id=q.brandId,
+            post_plan_id=q.postPlanId,
+        )
+        raise
     try:
         RunStateStore.add_event(
             q.runTraceId,
