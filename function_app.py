@@ -2,10 +2,10 @@
 import os
 import logging
 import azure.functions as func
-from src.function_blueprints.http_check_task_status import bp as check_status_bp
-from src.function_blueprints.durable_pipeline import bp as durable_bp
+import azure.durable_functions as df
 
-app = func.FunctionApp()
+# Use DFApp as the root app so Durable triggers/activities are correctly registered
+app = df.DFApp()
 
 
 def _configure_logging() -> None:
@@ -19,5 +19,3 @@ def _configure_logging() -> None:
 
 _configure_logging()
 
-app.register_functions(check_status_bp)
-app.register_functions(durable_bp)
