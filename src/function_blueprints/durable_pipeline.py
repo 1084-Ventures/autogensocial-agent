@@ -16,12 +16,13 @@ from src.function_blueprints.agent_tasks import (
 )
 from src.specs.agents.publish import PublishInput
 
-bp = func.Blueprint()
+# Use Durable Functions Blueprint, compatible with FunctionApp.register_functions
+bp = df.Blueprint()
 
 
 @bp.function_name(name="durable_http_start")
-@bp.route(route="durable_orchestrate", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
-@df.durable_client_input(client_name="client")
+@bp.route(route="durable_orchestrate", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@bp.durable_client_input(client_name="client")
 async def durable_http_start(
     req: func.HttpRequest, client: df.DurableOrchestrationClient
 ) -> func.HttpResponse:
@@ -61,7 +62,7 @@ async def durable_http_start(
 
 
 @bp.function_name(name="durable_orchestrator")
-@df.orchestration_trigger(context_name="context")
+@bp.orchestration_trigger(context_name="context")
 def durable_orchestrator(context: df.DurableOrchestrationContext):
     data = context.get_input() or {}
     plan = yield context.call_activity("durable_load_post_plan", data)
@@ -90,7 +91,7 @@ def durable_orchestrator(context: df.DurableOrchestrationContext):
 
 
 @bp.function_name(name="durable_generate_content")
-@df.activity_trigger(input_name="data")
+@bp.activity_trigger(input_name="data")
 def durable_generate_content(data: dict) -> dict:
     return generate_content_with_foundry_agent(
         data["runTraceId"], data["brandId"], data["postPlanId"]
@@ -98,7 +99,7 @@ def durable_generate_content(data: dict) -> dict:
 
 
 @bp.function_name(name="durable_generate_media")
-@df.activity_trigger(input_name="data")
+@bp.activity_trigger(input_name="data")
 def durable_generate_media(data: dict) -> dict:
     return generate_image_with_foundry_agent(
         run_trace_id=data["runTraceId"],
@@ -109,13 +110,13 @@ def durable_generate_media(data: dict) -> dict:
 
 
 @bp.function_name(name="durable_load_post_plan")
-@df.activity_trigger(input_name="data")
+@bp.activity_trigger(input_name="data")
 def durable_load_post_plan(data: dict) -> dict:
     return load_post_plan(brand_id=data["brandId"], post_plan_id=data["postPlanId"])
 
 
 @bp.function_name(name="durable_post_to_channel")
-@df.activity_trigger(input_name="data")
+@bp.activity_trigger(input_name="data")
 def durable_post_to_channel(data: dict) -> dict:
     publish = PublishInput(
         runTraceId=data["runTraceId"],
@@ -128,7 +129,7 @@ def durable_post_to_channel(data: dict) -> dict:
 
 
 @bp.function_name(name="durable_persist_post")
-@df.activity_trigger(input_name="data")
+@bp.activity_trigger(input_name="data")
 def durable_persist_post(data: dict) -> dict:
     result = persist_publish(
         PublishInput(
@@ -140,4 +141,3 @@ def durable_persist_post(data: dict) -> dict:
         )
     )
     return result.model_dump()
-
