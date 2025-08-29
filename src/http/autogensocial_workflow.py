@@ -3,8 +3,7 @@ import os
 
 import azure.functions as func
 import azure.durable_functions as df
-from azure.identity import DefaultAzureCredential
-from azure.ai.agents import AgentsClient
+from src.agents.copywriter_agent import generate_content_ref
 
 bp = df.Blueprint()
 
@@ -21,8 +20,8 @@ def _configure_logging() -> None:
 _configure_logging()
 
 
-@bp.route(route="durable_orchestrate", methods=["POST", "GET"])
-async def durable_orchestrate(req: func.HttpRequest, starter: str) -> func.HttpResponse:
+@bp.route(route="autogensocial/orchestrate", methods=["POST", "GET"])
+async def start_autogensocial(req: func.HttpRequest, starter: str) -> func.HttpResponse:
     client = df.DurableOrchestrationClient(starter)
     brand_id = req.params.get("brandId")
     post_plan_id = req.params.get("postPlanId")
@@ -37,7 +36,7 @@ async def durable_orchestrate(req: func.HttpRequest, starter: str) -> func.HttpR
         return func.HttpResponse("brandId and postPlanId are required", status_code=400)
 
     instance_id = await client.start_new(
-        "durable_orchestrator",
+        "autogensocial_orchestrator",
         None,
         {"brandId": brand_id, "postPlanId": post_plan_id},
     )
@@ -46,7 +45,7 @@ async def durable_orchestrate(req: func.HttpRequest, starter: str) -> func.HttpR
 
 
 @bp.orchestration_trigger(context_name="context")
-def durable_orchestrator(context: df.DurableOrchestrationContext):
+def autogensocial_orchestrator(context: df.DurableOrchestrationContext):
     payload = context.get_input()
     content_ref = yield context.call_activity("copywriter_activity", payload)
     return {"contentRef": content_ref}
@@ -57,32 +56,11 @@ def copywriter_activity(payload: dict) -> str:
     brand_id = payload.get("brandId")
     post_plan_id = payload.get("postPlanId")
     logger = logging.getLogger("autogensocial")
-
-    endpoint = os.getenv("PROJECT_ENDPOINT")
-    agent_id = os.getenv("COPYWRITER_AGENT_ID")
-    content_ref: str
-
-    if endpoint and agent_id:
-        try:
-            credential = DefaultAzureCredential()
-            client = AgentsClient(endpoint, credential)
-            instructions = (
-                f"Write social media copy for brand {brand_id} and plan {post_plan_id}."
-            )
-            run = client.create_thread_and_run(
-                agent_id=agent_id,
-                instructions=instructions,
-            )
-            content_ref = run.id
-        except Exception as exc:  # pragma: no cover - best effort
-            logger.exception("Failed to invoke copywriter agent: %s", exc)
-            content_ref = f"draft:{brand_id}:{post_plan_id}"
-    else:
-        logger.warning(
-            "Agent configuration missing; returning placeholder contentRef"
-        )
-        content_ref = f"draft:{brand_id}:{post_plan_id}"
-
+    content_ref = generate_content_ref(
+        brand_id=brand_id,
+        post_plan_id=post_plan_id,
+        logger=logger,
+    )
     logger.info(
         "Generated contentRef %s for brand %s plan %s",
         content_ref,

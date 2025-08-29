@@ -113,7 +113,7 @@ Azure AI Foundry Agents require authentication via `DefaultAzureCredential`. Loc
 
 ### Durable Pipeline
 
-The app uses a single durable orchestrator (`durable_orchestrator`) started via `POST /durable_orchestrate` to coordinate the workflow. Best practices applied to the orchestration include:
+The app uses a single durable orchestrator (`autogensocial_orchestrator`) started via `POST /autogensocial/orchestrate` to coordinate the workflow. Best practices applied to the orchestration include:
 
 - The HTTP starter triggers the orchestrator and returns the durable `instanceId` so clients can poll for progress.
 - The orchestrator remains deterministic and performs no direct I/O; all side effects are delegated to activity functions.
@@ -178,7 +178,7 @@ Clients query `/check_task_status` with the returned `instanceId` to monitor the
 ## Agents
 
 - Default agent implementation uses Azure AI Foundry Agents SDK and function tools for data access:
-  - `src/agents/copywriter_agent_foundry.py`
+  - `src/agents/copywriter_agent.py`
   - Tools are defined per-module and registered as function tools:
     - `src/tools/get_brand_tool.py`
     - `src/tools/get_post_plan_tool.py`
@@ -187,11 +187,14 @@ Clients query `/check_task_status` with the returned `instanceId` to monitor the
 
 - `PROJECT_ENDPOINT`: AI Foundry project endpoint
 - `MODEL_DEPLOYMENT_NAME`: Model deployment within the project
+- `COPYWRITER_AGENT_ID` (optional): pre-created agent id; if not set, the app will try to locate or create an agent named `COPYWRITER_AGENT_NAME`.
+- `COPYWRITER_AGENT_NAME` (optional): logical name used when auto-creating or resolving the agent (default: `AutogenSocialCopywriter`).
 - Azure login for `DefaultAzureCredential` (e.g., `az login` locally)
 
 ### Optional persistence
 
 - If `COSMOS_DB_CONNECTION_STRING`, `COSMOS_DB_NAME`, and `COSMOS_DB_CONTAINER_POSTS` are set, generated captions are stored as draft content and referenced by `contentRef`.
+- Agent ID persistence: If `COSMOS_DB_CONNECTION_STRING`, `COSMOS_DB_NAME`, and `COSMOS_DB_CONTAINER_AGENTS` are set, the app persists the mapping `{ logicalName -> agentId }` in Cosmos. Otherwise, it stores it in a local temp file (e.g., `/tmp/autogensocial/agents.json`).
 
 ## Contributing
 

@@ -4,7 +4,7 @@ id: 16629962-bb60-4718-ad83-7da6c0705c9e
 
 sequenceDiagram
     participant Client as Client (HTTP)
-    participant Starter as HTTP Starter (/durable_orchestrate)
+    participant Starter as HTTP Starter (/autogensocial/orchestrate)
     participant Orchestrator as Durable Orchestrator
     participant Copywriter as Copywriter Agent (Azure Foundry)
     participant ImageAgent as Image Agent (Azure Foundry)
@@ -42,4 +42,3 @@ sequenceDiagram
     Status->>Orchestrator: get_status(instanceId)
     Orchestrator-->>Status: runtime status + post
     Status-->>Client: StatusResponse
-
