@@ -110,15 +110,17 @@ Azure AI Foundry Agents require authentication via `DefaultAzureCredential`. Loc
 - **Agent**: FoundryCopywriterAgent - Manages Azure AI Foundry Agent interactions and tool registration
 - **Functions**: HTTP endpoints and durable orchestrations for workflow coordination
 - **Tools**: Core business logic implementations with standardized interfaces
+- **Specs**: Contracts and schemas under `src/specs/` (`openapi.yaml`, `workflow.yaml`, `schemas/`, `tools.yaml`)
 
 ### Durable Pipeline
 
 The app uses a single durable orchestrator (`autogensocial_orchestrator`) started via `POST /autogensocial/orchestrate` to coordinate the workflow. Best practices applied to the orchestration include:
 
 - The HTTP starter triggers the orchestrator and returns the durable `instanceId` so clients can poll for progress.
-- The orchestrator remains deterministic and performs no direct I/O; all side effects are delegated to activity functions.
+- The orchestrator remains deterministic and performs no direct I/O; all side effects are delegated to activity functions. Input is validated via Pydantic models at HTTP, orchestration, and activity boundaries.
 - Activity functions are idempotent and accept only the identifiers they need (brand, plan, content, media, etc.).
 - Durable Functions automatically checkpoints state after each activity, allowing the workflow to resume if the host restarts.
+- The orchestrator sets a `customStatus` with `phase`, and defaults `runTraceId` to the Durable `instanceId` for correlation when not supplied.
 
 The orchestrator calls three activities in sequence:
 

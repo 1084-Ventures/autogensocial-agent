@@ -4,6 +4,11 @@ import os
 import azure.functions as func
 import azure.durable_functions as df
 from src.agents.copywriter_agent import generate_content_ref
+from src.specs.models import (
+    OrchestrateRequest,
+    CopywriterActivityPayload,
+    ContentRefResult,
+)
 
 bp = df.Blueprint()
 
@@ -23,22 +28,24 @@ _configure_logging()
 @bp.route(route="autogensocial/orchestrate", methods=["POST", "GET"])
 async def start_autogensocial(req: func.HttpRequest, starter: str) -> func.HttpResponse:
     client = df.DurableOrchestrationClient(starter)
-    brand_id = req.params.get("brandId")
-    post_plan_id = req.params.get("postPlanId")
-    if not brand_id or not post_plan_id:
-        try:
-            body = req.get_json()
-        except ValueError:
-            body = {}
-        brand_id = brand_id or body.get("brandId")
-        post_plan_id = post_plan_id or body.get("postPlanId")
-    if not brand_id or not post_plan_id:
+    # Merge query and JSON body; query takes precedence if present
+    try:
+        body = req.get_json()
+    except ValueError:
+        body = {}
+    payload = {
+        "brandId": req.params.get("brandId") or body.get("brandId"),
+        "postPlanId": req.params.get("postPlanId") or body.get("postPlanId"),
+    }
+    try:
+        req_model = OrchestrateRequest(**payload)
+    except Exception:
         return func.HttpResponse("brandId and postPlanId are required", status_code=400)
 
     instance_id = await client.start_new(
         "autogensocial_orchestrator",
         None,
-        {"brandId": brand_id, "postPlanId": post_plan_id},
+        req_model.model_dump(),
     )
     logging.getLogger("autogensocial").info("Started orchestration %s", instance_id)
     return client.create_check_status_response(req, instance_id)
@@ -46,15 +53,36 @@ async def start_autogensocial(req: func.HttpRequest, starter: str) -> func.HttpR
 
 @bp.orchestration_trigger(context_name="context")
 def autogensocial_orchestrator(context: df.DurableOrchestrationContext):
-    payload = context.get_input()
-    content_ref = yield context.call_activity("copywriter_activity", payload)
-    return {"contentRef": content_ref}
+    # Validate and normalize the input for downstream activities
+    req_model = CopywriterActivityPayload.model_validate(context.get_input())
+    # Use the durable instance id as a default runTraceId for correlation
+    if not req_model.runTraceId:
+        req_model.runTraceId = context.instance_id
+    # Update custom status for observability (safe, deterministic)
+    context.set_custom_status(
+        {
+            "phase": "generating_content",
+            "runTraceId": req_model.runTraceId,
+        }
+    )
+    content_ref = yield context.call_activity(
+        "copywriter_activity", req_model.model_dump()
+    )
+    context.set_custom_status(
+        {
+            "phase": "completed",
+            "runTraceId": req_model.runTraceId,
+            "contentRef": content_ref,
+        }
+    )
+    return ContentRefResult(contentRef=content_ref).model_dump()
 
 
 @bp.activity_trigger(input_name="payload")
 def copywriter_activity(payload: dict) -> str:
-    brand_id = payload.get("brandId")
-    post_plan_id = payload.get("postPlanId")
+    req = CopywriterActivityPayload.model_validate(payload)
+    brand_id = req.brandId
+    post_plan_id = req.postPlanId
     logger = logging.getLogger("autogensocial")
     content_ref = generate_content_ref(
         brand_id=brand_id,
@@ -62,9 +90,10 @@ def copywriter_activity(payload: dict) -> str:
         logger=logger,
     )
     logger.info(
-        "Generated contentRef %s for brand %s plan %s",
+        "Generated contentRef %s for brand %s plan %s trace %s",
         content_ref,
         brand_id,
         post_plan_id,
+        req.runTraceId,
     )
     return content_ref

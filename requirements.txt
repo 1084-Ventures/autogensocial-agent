@@ -27,3 +27,6 @@ azure-ai-agents>=1.1.0
 
 # For Blob uploads (public media storage)
 azure-storage-blob>=12.19.0,<13.0.0
+
+# Dev tooling
+PyYAML>=6.0.0,<7.0.0
