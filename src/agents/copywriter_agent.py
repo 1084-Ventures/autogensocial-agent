@@ -1,11 +1,14 @@
 import os
 import logging
+import asyncio
 from functools import lru_cache
 from typing import Optional, Dict, Any
 from pathlib import Path
 
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents import AgentsClient
+from azure.identity.aio import DefaultAzureCredential as AsyncDefaultAzureCredential
+from azure.ai.agents.aio import AgentsClient as AsyncAgentsClient
 
 from .agent_registry import AgentRegistry
 from src.tools.registry import build_function_tools, execute_tool, list_tool_defs
@@ -129,22 +132,24 @@ def generate_content_ref(
             log.warning("No agent available; returning placeholder contentRef")
             return f"draft:{brand_id}:{post_plan_id}"
 
+    async def _invoke(agent_id: str) -> str:
+        async with AsyncDefaultAzureCredential() as credential:
+            async with AsyncAgentsClient(endpoint, credential) as client:
+                instructions = (
+                    f"Write social media copy for brand {brand_id} and plan {post_plan_id}."
+                )
+                run = await client.create_thread_and_run(
+                    agent_id=agent_id,
+                    instructions=instructions,
+                )
+                try:
+                    await _process_run_until_complete(client, run)
+                except Exception:
+                    pass
+                return run.id
+
     try:
-        client = _get_client(endpoint)
-        instructions = (
-            f"Write social media copy for brand {brand_id} and plan {post_plan_id}."
-        )
-        run = client.create_thread_and_run(
-            agent_id=agent_id,
-            instructions=instructions,
-        )
-        # Process tool calls until run completes or fails; return run id as contentRef
-        try:
-            _process_run_until_complete(client, run)
-        except Exception:
-            # Best-effort; even if tooling fails we still return the run id
-            pass
-        return run.id
+        return asyncio.run(_invoke(agent_id))
     except Exception as exc:  # pragma: no cover - best effort
         log.exception("Failed to invoke copywriter agent: %s", exc)
         return f"draft:{brand_id}:{post_plan_id}"
@@ -258,25 +263,18 @@ def _slugify(name: str) -> str:
     return "".join(ch.lower() if ch.isalnum() else "_" for ch in name).strip("_")
 
 
-def _process_run_until_complete(client: AgentsClient, run) -> None:
-    """Poll the run; if tools are requested, execute and submit outputs.
-
-    Compatible with Agents API patterns where a run reports `status`
-    and may include `required_action.submit_tool_outputs.tool_calls`.
-    """
+async def _process_run_until_complete(client: AsyncAgentsClient, run) -> None:
+    """Asynchronously poll the run and handle tool call submissions."""
     import json
-    import time
 
-    # Attempt to extract thread id from the run; fallback to attribute
     thread_id = getattr(run, "thread_id", None)
     run_id = getattr(run, "id", None)
     if not (thread_id and run_id):
         return
 
     while True:
-        current = client.get_run(thread_id=thread_id, run_id=run_id)
+        current = await client.get_run(thread_id=thread_id, run_id=run_id)
         status = getattr(current, "status", None)
-        # When tools are needed, the run indicates a required action
         required_action = getattr(current, "required_action", None)
         if required_action and getattr(required_action, "type", None) == "submit_tool_outputs":
             tool_calls = getattr(required_action, "submit_tool_outputs", None)
@@ -290,19 +288,17 @@ def _process_run_until_complete(client: AgentsClient, run) -> None:
                     args = json.loads(arguments) if isinstance(arguments, str) else arguments
                 except Exception:
                     args = {}
-                # Dispatch to local tool functions
-                output_text = _execute_tool(name, args)
+                output_text = await asyncio.to_thread(_execute_tool, name, args)
                 outputs.append({"tool_call_id": call_id, "output": output_text})
             if outputs:
-                client.submit_tool_outputs(
+                await client.submit_tool_outputs(
                     thread_id=thread_id,
                     run_id=run_id,
                     tool_outputs=outputs,
                 )
-            # Loop will continue and poll again
         elif status in {"completed", "failed", "cancelled", "expired"}:
             return
-        time.sleep(0.75)
+        await asyncio.sleep(0.75)
 
 
 def _execute_tool(name: str, args: dict) -> str:
