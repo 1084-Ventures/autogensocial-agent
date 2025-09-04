@@ -181,17 +181,22 @@ Clients query `/check_task_status` with the returned `instanceId` to monitor the
 
 - Default agent implementation uses Azure AI Foundry Agents SDK and function tools for data access:
   - `src/agents/copywriter_agent.py`
-  - Tools are defined per-module and registered as function tools:
-    - `src/tools/get_brand_tool.py`
-    - `src/tools/get_post_plan_tool.py`
+  - Tools are modular and auto-discovered from `src/tools/*_tool.py`.
+    - Each tool module must export:
+      - `TOOL_DEF`: `ToolDef(name, description, input_model, output_model)`
+      - `execute(args: dict, logger=None)` returning the typed response model
+    - Example tools:
+      - `src/tools/get_brand_tool.py`
+      - `src/tools/get_post_plan_tool.py`
 
 ### Required environment for agents
 
 - `PROJECT_ENDPOINT`: AI Foundry project endpoint
 - `MODEL_DEPLOYMENT_NAME`: Model deployment within the project
-- `COPYWRITER_AGENT_ID` (optional): pre-created agent id; if not set, the app will try to locate or create an agent named `COPYWRITER_AGENT_NAME`.
 - `COPYWRITER_AGENT_NAME` (optional): logical name used when auto-creating or resolving the agent (default: `AutogenSocialCopywriter`).
 - Azure login for `DefaultAzureCredential` (e.g., `az login` locally)
+
+Resolution: The app resolves the agent ID by checking the registry (Cosmos DB when configured, otherwise a local temp file) using `COPYWRITER_AGENT_NAME`; if not found, it searches by name and persists it, or creates a new agent and persists it. When it finds an existing agent, it best-effort updates the agent to include the function tools (`get_brand`, `get_post_plan`). The `COPYWRITER_AGENT_ID` environment variable is not used.
 
 ### Optional persistence
 
