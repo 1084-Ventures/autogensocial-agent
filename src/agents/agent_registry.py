@@ -3,7 +3,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Any
 
 from azure.cosmos import CosmosClient  # type: ignore
 
@@ -58,7 +58,10 @@ class AgentRegistry:
         path: Path = target
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            return data.get(logical_name)
+            value = data.get(logical_name)
+            if isinstance(value, dict):
+                return value.get("agentId")
+            return value
         except Exception:
             return None
 
@@ -66,7 +69,13 @@ class AgentRegistry:
         kind, target = self._backend
         if kind == "cosmos":
             cont = target
-            doc = {"id": logical_name, "logicalName": logical_name, "agentId": agent_id}
+            # Merge if doc exists
+            try:
+                doc = cont.read_item(item=logical_name, partition_key=logical_name)
+            except Exception:
+                doc = {"id": logical_name, "logicalName": logical_name}
+            doc["agentId"] = agent_id
+            doc.setdefault("kind", "AgentConfig")
             cont.upsert_item(doc)
             return
         # file backend
@@ -75,6 +84,55 @@ class AgentRegistry:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             data = {}
-        data[logical_name] = agent_id
+        value = data.get(logical_name)
+        if isinstance(value, dict):
+            value["agentId"] = agent_id
+            data[logical_name] = value
+        else:
+            data[logical_name] = {"agentId": agent_id, "kind": "AgentConfig"}
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
+    # Extended config support
+    def get_config(self, logical_name: str) -> Optional[Dict[str, Any]]:
+        kind, target = self._backend
+        if kind == "cosmos":
+            cont = target
+            try:
+                doc = cont.read_item(item=logical_name, partition_key=logical_name)
+                return dict(doc)
+            except Exception:
+                return None
+        # file backend
+        path: Path = target
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            value = data.get(logical_name)
+            if isinstance(value, dict):
+                return value
+            if value is None:
+                return None
+            # Back-compat: plain agentId string only
+            return {"agentId": value, "kind": "AgentConfig"}
+        except Exception:
+            return None
+
+    def upsert_config(self, logical_name: str, config: Dict[str, Any]) -> None:
+        kind, target = self._backend
+        if kind == "cosmos":
+            cont = target
+            doc = dict(config)
+            doc.setdefault("id", logical_name)
+            doc.setdefault("logicalName", logical_name)
+            doc.setdefault("kind", "AgentConfig")
+            cont.upsert_item(doc)
+            return
+        # file backend
+        path: Path = target
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        doc = dict(config)
+        doc.setdefault("kind", "AgentConfig")
+        data[logical_name] = doc
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")

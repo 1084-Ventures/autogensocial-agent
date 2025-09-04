@@ -198,6 +198,11 @@ Clients query `/check_task_status` with the returned `instanceId` to monitor the
 
 Resolution: The app resolves the agent ID by checking the registry (Cosmos DB when configured, otherwise a local temp file) using `COPYWRITER_AGENT_NAME`; if not found, it searches by name and persists it, or creates a new agent and persists it. When it finds an existing agent, it best-effort updates the agent to include the function tools (`get_brand`, `get_post_plan`). The `COPYWRITER_AGENT_ID` environment variable is not used.
 
+Instructions storage:
+- Canonical source is stored in Cosmos DB (same container as the agent registry) as an `AgentConfig` document keyed by the logical name. Fields include `agentId`, `instructions`, optional `tools`, etc.
+- On first run, if `instructions` are missing, the app seeds them from a local file under `src/agents/instructions/<logical_name>.md` (e.g., `copywriter.md`) and writes them to Cosmos.
+- On ensure, the app compares Cosmos instructions to the remote agent and updates the agent if they drift.
+
 ### Optional persistence
 
 - If `COSMOS_DB_CONNECTION_STRING`, `COSMOS_DB_NAME`, and `COSMOS_DB_CONTAINER_POSTS` are set, generated captions are stored as draft content and referenced by `contentRef`.

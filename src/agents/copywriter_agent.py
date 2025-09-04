@@ -1,13 +1,14 @@
 import os
 import logging
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, Dict, Any
+from pathlib import Path
 
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents import AgentsClient
 
 from .agent_registry import AgentRegistry
-from src.tools.registry import build_function_tools, execute_tool
+from src.tools.registry import build_function_tools, execute_tool, list_tool_defs
 
 
 @lru_cache(maxsize=1)
@@ -42,6 +43,7 @@ def ensure_copywriter_agent_id(
             _ = client.get_agent(reg_id)
             try:
                 _ensure_agent_tools(client, reg_id, log)
+                _ensure_agent_config(client, reg_id, agent_name, registry, log)
             except Exception:
                 pass
             return reg_id
@@ -56,6 +58,7 @@ def ensure_copywriter_agent_id(
                     registry.set(agent_name, agent.id)  # type: ignore[attr-defined]
                     try:
                         _ensure_agent_tools(client, agent.id, log)  # type: ignore[arg-type]
+                        _ensure_agent_config(client, agent.id, agent_name, registry, log)  # type: ignore[arg-type]
                     except Exception:
                         pass
                     return agent.id  # type: ignore[attr-defined]
@@ -73,19 +76,16 @@ def ensure_copywriter_agent_id(
     try:
         # Create agent with function tools for data access
         tools = build_function_tools()
+        desired_instructions = _resolve_desired_instructions(agent_name, registry, log)
         created = client.create_agent(
             name=agent_name,
             model=model_deployment,
-            instructions=(
-                "You are a copywriter agent for AutogenSocial. "
-                "Generate concise, engaging social media captions and hashtags. "
-                "Use the provided tools (get_brand, get_post_plan) to fetch brand "
-                "and plan details before drafting content when helpful."
-            ),
+            instructions=desired_instructions,
             tools=tools,
         )
         agent_id = created.id  # type: ignore[attr-defined]
         registry.set(agent_name, agent_id)
+        _persist_agent_config_snapshot(agent_name, agent_id, registry, log)
         log.info("Created agent '%s' with id %s", agent_name, agent_id)
         return agent_id
     except Exception as exc:  # pragma: no cover - best effort
@@ -171,6 +171,91 @@ def _ensure_agent_tools(client: AgentsClient, agent_id: str, logger: Optional[lo
     except Exception as exc:
         # If update is not supported, log at debug to avoid noise
         log.debug("Could not update agent tools for %s: %s", agent_id, exc)
+
+
+def _resolve_desired_instructions(
+    agent_name: str, registry: AgentRegistry, logger: Optional[logging.Logger] = None
+) -> str:
+    """Determine instructions from Cosmos config or seed from local file.
+
+    - If config doc has 'instructions', use it.
+    - Else, load from 'src/agents/instructions/{slug}.md'; persist to config for future.
+    - Else, fall back to code default.
+    """
+    log = logger or logging.getLogger("autogensocial")
+    cfg = registry.get_config(agent_name) or {}
+    instr = (cfg or {}).get("instructions") if isinstance(cfg, dict) else None
+    if isinstance(instr, str) and instr.strip():
+        return instr
+    # Try file seed
+    slug = _slugify(agent_name)
+    here = Path(__file__).resolve().parent
+    fpath = here / "instructions" / f"{slug}.md"
+    if fpath.exists():
+        try:
+            text = fpath.read_text(encoding="utf-8").strip()
+            if text:
+                # Persist
+                cfg = cfg if isinstance(cfg, dict) else {}
+                cfg.update({
+                    "logicalName": agent_name,
+                    "instructions": text,
+                    "tools": [t.name for t in list_tool_defs()],
+                })
+                registry.upsert_config(agent_name, cfg)
+                return text
+        except Exception as exc:
+            log.debug("Failed to read default instructions file %s: %s", fpath, exc)
+    # Code fallback
+    return (
+        "You are a copywriter agent for AutogenSocial. "
+        "Generate concise, engaging social media captions and hashtags. "
+        "Use the provided tools to fetch brand and plan details before drafting content."
+    )
+
+
+def _persist_agent_config_snapshot(
+    agent_name: str, agent_id: str, registry: AgentRegistry, logger: Optional[logging.Logger] = None
+) -> None:
+    log = logger or logging.getLogger("autogensocial")
+    cfg = registry.get_config(agent_name) or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg.update({"logicalName": agent_name, "agentId": agent_id})
+    try:
+        registry.upsert_config(agent_name, cfg)
+    except Exception as exc:
+        log.debug("Failed to persist agent config snapshot: %s", exc)
+
+
+def _ensure_agent_config(
+    client: AgentsClient,
+    agent_id: str,
+    agent_name: str,
+    registry: AgentRegistry,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Ensure the remote agent's instructions match the desired config."""
+    log = logger or logging.getLogger("autogensocial")
+    desired = _resolve_desired_instructions(agent_name, registry, log)
+    try:
+        details = client.get_agent(agent_id)
+        current = getattr(details, "instructions", None)
+        if isinstance(current, str) and current.strip() == desired.strip():
+            return
+    except Exception:
+        # If we can't read details, attempt update anyway
+        pass
+    try:
+        client.update_agent(agent_id=agent_id, instructions=desired)  # type: ignore[attr-defined]
+        _persist_agent_config_snapshot(agent_name, agent_id, registry, log)
+        log.info("Updated agent %s instructions from config", agent_id)
+    except Exception as exc:
+        log.debug("Could not update agent instructions for %s: %s", agent_id, exc)
+
+
+def _slugify(name: str) -> str:
+    return "".join(ch.lower() if ch.isalnum() else "_" for ch in name).strip("_")
 
 
 def _process_run_until_complete(client: AgentsClient, run) -> None:
