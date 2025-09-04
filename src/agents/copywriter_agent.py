@@ -2,7 +2,7 @@ import os
 import logging
 import asyncio
 from functools import lru_cache
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from pathlib import Path
 
 from azure.identity import DefaultAzureCredential
@@ -18,6 +18,21 @@ from src.tools.registry import build_function_tools, execute_tool, list_tool_def
 def _get_client(endpoint: str) -> AgentsClient:
     credential = DefaultAzureCredential()
     return AgentsClient(endpoint, credential)
+
+
+_async_client_cache: Dict[str, AsyncAgentsClient] = {}
+_async_credential: Optional[AsyncDefaultAzureCredential] = None
+
+
+def _get_async_client(endpoint: str) -> AsyncAgentsClient:
+    global _async_credential
+    if endpoint in _async_client_cache:
+        return _async_client_cache[endpoint]
+    if _async_credential is None:
+        _async_credential = AsyncDefaultAzureCredential()
+    client = AsyncAgentsClient(endpoint, _async_credential)
+    _async_client_cache[endpoint] = client
+    return client
 
 
 def ensure_copywriter_agent_id(
@@ -96,7 +111,7 @@ def ensure_copywriter_agent_id(
         return None
 
 
-def generate_content_ref(
+async def generate_content_ref(
     brand_id: str,
     post_plan_id: str,
     *,
@@ -132,24 +147,20 @@ def generate_content_ref(
             log.warning("No agent available; returning placeholder contentRef")
             return f"draft:{brand_id}:{post_plan_id}"
 
-    async def _invoke(agent_id: str) -> str:
-        async with AsyncDefaultAzureCredential() as credential:
-            async with AsyncAgentsClient(endpoint, credential) as client:
-                instructions = (
-                    f"Write social media copy for brand {brand_id} and plan {post_plan_id}."
-                )
-                run = await client.create_thread_and_run(
-                    agent_id=agent_id,
-                    instructions=instructions,
-                )
-                try:
-                    await _process_run_until_complete(client, run)
-                except Exception:
-                    pass
-                return run.id
-
     try:
-        return asyncio.run(_invoke(agent_id))
+        client = _get_async_client(endpoint)
+        instructions = (
+            f"Write social media copy for brand {brand_id} and plan {post_plan_id}."
+        )
+        run = await client.create_thread_and_run(
+            agent_id=agent_id,
+            instructions=instructions,
+        )
+        try:
+            await _process_run_until_complete(client, run)
+        except Exception:
+            pass
+        return run.id
     except Exception as exc:  # pragma: no cover - best effort
         log.exception("Failed to invoke copywriter agent: %s", exc)
         return f"draft:{brand_id}:{post_plan_id}"
