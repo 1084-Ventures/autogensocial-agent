@@ -65,9 +65,16 @@ def autogensocial_orchestrator(context: df.DurableOrchestrationContext):
             "runTraceId": req_model.runTraceId,
         }
     )
-    content_ref = yield context.call_activity(
-        "copywriter_activity", req_model.model_dump()
-    )
+    retry_opts = df.RetryOptions(5000, 3)
+    try:
+        content_ref = yield context.call_activity_with_retry(
+            "copywriter_activity", retry_opts, req_model.model_dump()
+        )
+    except Exception as exc:
+        context.set_custom_status(
+            {"phase": "failed", "runTraceId": req_model.runTraceId}
+        )
+        return {"error": str(exc)}
     context.set_custom_status(
         {
             "phase": "completed",
@@ -79,12 +86,12 @@ def autogensocial_orchestrator(context: df.DurableOrchestrationContext):
 
 
 @bp.activity_trigger(input_name="payload")
-def copywriter_activity(payload: dict) -> str:
+async def copywriter_activity(payload: dict) -> str:
     req = CopywriterActivityPayload.model_validate(payload)
     brand_id = req.brandId
     post_plan_id = req.postPlanId
     logger = logging.getLogger("autogensocial")
-    content_ref = generate_content_ref(
+    content_ref = await generate_content_ref(
         brand_id=brand_id,
         post_plan_id=post_plan_id,
         logger=logger,
