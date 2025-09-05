@@ -13,13 +13,17 @@ This document outlines how to design an image composer agent that collaborates w
 2. **Gather base images**
    - If the copywriter requests a search, call image search APIs or internal stores.
    - If generation is requested, call a model such as Stable Diffusion or DALL·E.
-3. **Compose previews**
+3. **Compose candidate previews**
    - Build a list of layers (image and text) describing position, size, rotation, opacity, font, and color.
-   - Call the Pillow-based `compose_image` function to render a PNG preview.
-4. **Iterate**
-   - Return the preview to the copywriter agent.
-   - Accept adjustments to layer properties and re-compose until approved.
-5. **Finalize and store**
+   - Call the Pillow-based `compose_image` function to render one or more PNG previews.
+4. **Self-review and refine**
+   - Generate variations by tweaking prompts, seeds, or layer properties.
+   - Score each candidate using CLIP similarity, brand heuristics, or aesthetic models.
+   - Keep the best-scoring preview or loop until quality thresholds are met.
+5. **Collaborate and iterate**
+   - Return the chosen preview to the copywriter agent.
+   - Accept adjustments to layer properties or regeneration requests and re-compose until approved.
+6. **Finalize and store**
    - Save approved images to blob storage and collect their URLs.
    - Attach the URLs to the post for publishing (single image or carousel).
 
@@ -48,7 +52,14 @@ class ImageLayer:
 - `search_images(query, source, brand_id)`
 - `generate_image(prompt, brand_id)`
 - `compose_image(composition_request)`
+- `rate_image(image, prompt, brand_id)`
+- `refine_prompt(prompt, feedback)`
 - `save_to_blob(image_bytes, path)`
 
-These tools enable the agent to retrieve assets, generate previews, and store approved images.
+These tools enable the agent to retrieve assets, generate previews, critique results, and store approved images.
 
+## Best Practices for Creative Image Generation
+- Preserve metadata for each iteration (prompts, seeds, scores) to allow reproducibility and learning.
+- Produce multiple candidates and track scores to encourage exploration.
+- Use asynchronous generation to explore variations in parallel.
+- Allow agents to provide structured critiques on composition and color balance to guide prompt refinement.
