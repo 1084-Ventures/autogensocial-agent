@@ -1,6 +1,6 @@
 # Composer Agent Architecture
 
-This document outlines how to design an image composer agent that collaborates with a copywriter agent to create on-brand visual assets.
+This document outlines how to design an image composer agent that creates on-brand visual assets from copywriter output.
 
 ## Inputs
 - **Brand document ID** – resolves fonts, colors, and logos.
@@ -11,7 +11,7 @@ This document outlines how to design an image composer agent that collaborates w
 1. **Fetch context**
    - Load brand and post plan documents using their IDs.
 2. **Gather base images**
-   - If the copywriter requests a search, call image search APIs or internal stores.
+   - If the copywriter output requests a search, call image search APIs or internal stores.
    - If generation is requested, call a model such as Stable Diffusion or DALL·E.
 3. **Compose candidate previews**
    - Build a list of layers (image and text) describing position, size, rotation, opacity, font, and color.
@@ -20,10 +20,7 @@ This document outlines how to design an image composer agent that collaborates w
    - Generate variations by tweaking prompts, seeds, or layer properties.
    - Score each candidate using CLIP similarity, brand heuristics, or aesthetic models.
    - Keep the best-scoring preview or loop until quality thresholds are met.
-5. **Collaborate and iterate**
-   - Return the chosen preview to the copywriter agent.
-   - Accept adjustments to layer properties or regeneration requests and re-compose until approved.
-6. **Finalize and store**
+5. **Finalize and store**
    - Save approved images to blob storage and collect their URLs.
    - Attach the URLs to the post for publishing (single image or carousel).
 
@@ -62,4 +59,4 @@ These tools enable the agent to retrieve assets, generate previews, critique res
 - Preserve metadata for each iteration (prompts, seeds, scores) to allow reproducibility and learning.
 - Produce multiple candidates and track scores to encourage exploration.
 - Use asynchronous generation to explore variations in parallel.
-- Allow agents to provide structured critiques on composition and color balance to guide prompt refinement.
+- Use structured self-critiques on composition and color balance to guide prompt refinement.
